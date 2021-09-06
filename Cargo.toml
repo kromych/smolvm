@@ -1,0 +1,18 @@
+[package]
+name = "rust-kvm-example"
+version = "0.1.0"
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+libc = ">=0.2.39"
+kvm-bindings = "0.5"
+kvm-ioctls = "0.10"
+clap = "2.33"
+env_logger="0.9"
+log="0.4"
+zerocopy="0.5"
+
+[dev-dependencies]
+byteorder = ">=1.2.1"
