@@ -1,4 +1,8 @@
-use object::{Architecture, Object, ObjectSection, SectionKind};
+use object::{
+    elf::FileHeader64,
+    read::elf::{FileHeader, ProgramHeader},
+    Architecture, Endianness, FileKind, Object, ObjectSection, SectionKind,
+};
 
 use std::fs;
 
@@ -7,6 +11,8 @@ compile_error!("Unsupported target architecture");
 
 #[cfg(target_arch = "x86_64")]
 mod x86_64;
+
+mod boot_params;
 
 fn disassemble_x86_64(bytes: &[u8], ip: u64) {
     use iced_x86::Formatter;
@@ -74,17 +80,53 @@ fn mmap_anonymous(size: usize) -> *mut u8 {
 fn main() -> Result<(), std::io::Error> {
     env_logger::init();
 
-    let kernel_path = //"./kernels/linux-5.14-stable/x86_64/vmlinux";
-            "./kernels/linux-5.14-stable/aarch64/vmlinux";
+    let kernel_path = "./kernels/linux-5.14-stable/x86_64/vmlinux";
+    //"./kernels/linux-5.14-stable/aarch64/vmlinux";
     log::info!("Loading {}", kernel_path);
 
-    let bin_data = fs::read(kernel_path)?;
+    let file = fs::File::open(&kernel_path)?;
+    let file = unsafe { memmap2::Mmap::map(&file)? };
+
+    let bin_data = &*file;
     log::info!("File size {} bytes", bin_data.len());
 
-    let obj_file = object::File::parse(&*bin_data).unwrap();
+    let obj_file = object::File::parse(bin_data).unwrap();
+    let obj_file_kind = object::FileKind::parse(bin_data).unwrap();
+
+    log::info!("File kind {:?}", obj_file_kind);
+
+    if obj_file_kind != FileKind::Elf64 {
+        panic!("Only ELF64 files are supported");
+    }
 
     let arch = obj_file.architecture();
     log::info!("Architecture {:?}", arch);
+
+    if let Ok(elf) = FileHeader64::<Endianness>::parse(bin_data) {
+        if let Ok(endian) = elf.endian() {
+            if let Ok(segments) = elf.program_headers(endian, bin_data) {
+                for (index, segment) in segments.iter().enumerate() {
+                    let offset = segment.p_offset(endian);
+                    let virt_addr = segment.p_vaddr(endian);
+                    let phys_addr = segment.p_paddr(endian);
+                    let file_size = segment.p_filesz(endian);
+                    let memory_size = segment.p_memsz(endian);
+                    let align = segment.p_align(endian);
+
+                    log::info!(
+                        "Segment #{}: offset 0x{:x}, virt.address 0x{:x}, phys.addr 0x{:x}, file size 0x{:x}, memory size 0x{:x}, align 0x{:x}",
+                            index,
+                            offset,
+                            virt_addr,
+                            phys_addr,
+                            file_size,
+                            memory_size,
+                            align
+                        );
+                }
+            }
+        }
+    }
 
     for section in obj_file.sections() {
         let name = section.name().unwrap_or_default();
@@ -92,14 +134,16 @@ fn main() -> Result<(), std::io::Error> {
         let align = section.align();
         let kind = section.kind();
         let size = section.size();
+        let reloc_count = section.relocations().count();
 
         log::info!(
-            "Section found: {}, size 0x{:x}, address 0x{:x}, align 0x{:x}, kind {:?}",
+            "Section {}, size 0x{:x}, address 0x{:x}, align 0x{:x}, kind {:?}, relocations {}",
             name,
             size,
             address,
             align,
-            kind
+            kind,
+            reloc_count
         );
 
         let file_range = section.file_range();
