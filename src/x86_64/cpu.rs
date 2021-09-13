@@ -108,7 +108,9 @@ macro_rules! bit {
 }
 
 pub const PAGE_SHIFT: u64 = 12;
+pub const LARGE_PAGE_SHIFT: u64 = 21;
 pub const PAGE_SIZE: u64 = 1 << PAGE_SHIFT;
+pub const LARGE_PAGE_SIZE: u64 = 1 << LARGE_PAGE_SHIFT;
 
 pub const fn get_pfn(phys_addr: u64) -> u64 {
     phys_addr >> PAGE_SHIFT
