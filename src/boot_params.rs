@@ -3,6 +3,16 @@
 
 #![allow(dead_code)]
 
+pub const BOOT_CODE_CS_GDT_INDEX: u16 = 2;
+pub const BOOT_CODE_SS_GDT_INDEX: u16 = 3;
+pub const BOOT_CODE_LDT_GDT_INDEX: u16 = 6;
+pub const BOOT_CODE_TSS_GDT_INDEX: u16 = 8;
+
+pub const BOOT_CODE_CS: u16 = BOOT_CODE_CS_GDT_INDEX << 3;
+pub const BOOT_CODE_DS: u16 = BOOT_CODE_SS_GDT_INDEX << 3;
+pub const BOOT_CODE_LDT: u16 = BOOT_CODE_LDT_GDT_INDEX << 3;
+pub const BOOT_CODE_TSS: u16 = BOOT_CODE_TSS_GDT_INDEX << 3;
+
 #[repr(C, packed)]
 pub struct ScreenInfo {
     pub orig_x: u8,
