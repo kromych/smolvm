@@ -1,9 +1,9 @@
 use kvm_bindings::kvm_userspace_memory_region;
 use kvm_ioctls::Kvm;
-use kvm_ioctls::VcpuFd;
 use kvm_ioctls::VmFd;
 
 use self::x86_64::CpuX86_64;
+use kvm_ioctls::VcpuExit;
 use object::{
     elf::FileHeader64,
     read::elf::{FileHeader, ProgramHeader},
@@ -11,6 +11,8 @@ use object::{
 };
 use std::ops::Deref;
 use std::ops::DerefMut;
+use std::sync::Arc;
+use std::sync::Mutex;
 
 #[cfg(target_arch = "x86_64")]
 mod x86_64;
@@ -51,10 +53,8 @@ fn disassemble_x86_64(bytes: &[u8], ip: u64) {
 }
 
 fn disassemble_aarch64(bytes: &[u8], ip: u64) {
-    for maybe_decoded in bad64::disasm(bytes, ip) {
-        if let Ok(decoded) = maybe_decoded {
-            log::info!("0x{:016x}    {:40}", decoded.address(), decoded);
-        }
+    for decoded in bad64::disasm(bytes, ip).flatten() {
+        log::info!("0x{:016x}    {:40}", decoded.address(), decoded);
     }
 }
 
@@ -73,11 +73,7 @@ impl Memory {
         })
     }
 
-    pub fn as_slice(&self) -> &[u8] {
-        unsafe { std::slice::from_raw_parts(self.memory, self.memory_size) }
-    }
-
-    pub fn as_slice_mut(&mut self) -> &[u8] {
+    pub fn as_slice_mut(&mut self) -> &mut [u8] {
         unsafe { std::slice::from_raw_parts_mut(self.memory, self.memory_size) }
     }
 
@@ -107,50 +103,63 @@ impl Memory {
 }
 
 pub trait VirtualCpu {
-    fn new(vm_fd: &VmFd, memory: &mut Memory) -> Result<Self, std::io::Error>
+    fn new(vm_fd: &VmFd, memory: Arc<Mutex<Memory>>) -> Result<Self, std::io::Error>
     where
         Self: Sized;
-    fn map(pfn: u64, virt_addr: u64);
-    fn run() -> Result<(), std::io::Error>;
+    fn init(&self) -> Result<(), std::io::Error>;
+    fn map(&self, pfn: u64, virt_addr: u64);
+    fn set_instruction_pointer(&self, ip: u64) -> Result<(), std::io::Error>;
+    fn get_instruction_pointer(&self) -> Result<u64, std::io::Error>;
+    fn run(&self) -> Result<VcpuExit, std::io::Error>;
 }
 
 pub struct _Vm<Cpu: VirtualCpu> {
-    kvm_fd: Kvm,
-    vm_fd: VmFd,
+    native_arch: Architecture,
     cpu: Cpu,
-    memory: Memory,
+    memory: Arc<Mutex<Memory>>,
 }
 
 impl<Cpu: VirtualCpu> _Vm<Cpu> {
     pub fn new(memory_size: usize) -> Result<Self, std::io::Error> {
+        #[cfg(target_arch = "x86_64")]
+        let native_arch = Architecture::X86_64;
+
+        #[cfg(target_arch = "aarch64")]
+        let native_arch = Architecture::Aarch64;
+
         let kvm_fd = Kvm::new()?;
         let vm_fd = kvm_fd.create_vm()?;
-        let mut memory = Memory::new(memory_size)?;
-        let cpu = Cpu::new(&vm_fd, &mut memory)?;
+        let memory = Arc::new(Mutex::new(Memory::new(memory_size)?));
 
-        unsafe {
-            vm_fd.set_user_memory_region(kvm_userspace_memory_region {
-                slot: 0,
-                guest_phys_addr: 0,
-                memory_size: memory_size as u64,
-                userspace_addr: memory.start_addr() as u64,
-                flags: 0,
-            })?;
+        {
+            let memory = memory.clone();
+            let memory = memory.lock().unwrap();
+            unsafe {
+                vm_fd.set_user_memory_region(kvm_userspace_memory_region {
+                    slot: 0,
+                    guest_phys_addr: 0,
+                    memory_size: memory_size as u64,
+                    userspace_addr: memory.start_addr() as u64,
+                    flags: 0,
+                })?;
+            }
         }
 
+        let cpu = Cpu::new(&vm_fd, memory.clone())?;
+        cpu.init()?;
+
         Ok(Self {
-            kvm_fd,
-            vm_fd,
+            native_arch,
             cpu,
             memory,
         })
     }
 
-    pub fn load_elf(&mut self, bin_data: &[u8]) {
-        log::info!("File size {} bytes", bin_data.len());
+    pub fn load_elf(&mut self, elf_data: &[u8]) {
+        log::info!("File size {} bytes", elf_data.len());
 
-        let obj_file = object::File::parse(bin_data).unwrap();
-        let obj_file_kind = object::FileKind::parse(bin_data).unwrap();
+        let obj_file = object::File::parse(elf_data).unwrap();
+        let obj_file_kind = object::FileKind::parse(elf_data).unwrap();
 
         log::info!("File kind {:?}", obj_file_kind);
 
@@ -161,9 +170,9 @@ impl<Cpu: VirtualCpu> _Vm<Cpu> {
         let arch = obj_file.architecture();
         log::info!("Architecture {:?}", arch);
 
-        if let Ok(elf) = FileHeader64::<Endianness>::parse(bin_data) {
+        if let Ok(elf) = FileHeader64::<Endianness>::parse(elf_data) {
             if let Ok(endian) = elf.endian() {
-                if let Ok(segments) = elf.program_headers(endian, bin_data) {
+                if let Ok(segments) = elf.program_headers(endian, elf_data) {
                     for (index, segment) in segments.iter().enumerate() {
                         let offset = segment.p_offset(endian);
                         let virt_addr = segment.p_vaddr(endian);
@@ -231,11 +240,48 @@ impl<Cpu: VirtualCpu> _Vm<Cpu> {
         log::info!("Entry point 0x{:x}", entry);
     }
 
-    pub fn run(&mut self) -> Result<(), std::io::Error> {
+    pub fn load_bin(&mut self, bin_data: &[u8], load_addr: u64) {
+        log::info!("Loading binary data at 0x{:x}", load_addr);
+
+        if self.native_arch == Architecture::X86_64 {
+            disassemble_x86_64(bin_data, load_addr);
+        } else if self.native_arch == Architecture::Aarch64 {
+            disassemble_aarch64(bin_data, load_addr);
+        }
+
+        let mut memory = self.memory.lock().unwrap();
+        let memory = &mut memory.as_slice_mut();
+        if bin_data.len() + load_addr as usize > memory.len() {
+            panic!("Out of memory");
+        }
+
+        for i in 0..bin_data.len() {
+            memory[load_addr as usize + i] = bin_data[i];
+        }
+    }
+
+    pub fn run(&mut self, ip: u64) -> Result<(), std::io::Error> {
+        self.cpu.set_instruction_pointer(ip)?;
+
+        log::info!("Starting execution at 0x{:x}", ip);
+
+        loop {
+            match self.cpu.run()? {
+                VcpuExit::Hlt => {
+                    log::info!(
+                        "Execution halted at 0x{:x}",
+                        self.cpu.get_instruction_pointer()?
+                    );
+                    break;
+                }
+                e => panic!("Unsupported Vcpu Exit {:?}", e),
+            }
+        }
         Ok(())
     }
 }
 
+#[cfg(target_arch = "x86_64")]
 pub struct Vm(_Vm<CpuX86_64>);
 
 impl Vm {
@@ -245,6 +291,7 @@ impl Vm {
 }
 
 impl Deref for Vm {
+    #[cfg(target_arch = "x86_64")]
     type Target = _Vm<CpuX86_64>;
 
     fn deref(&self) -> &Self::Target {
@@ -255,5 +302,16 @@ impl Deref for Vm {
 impl DerefMut for Vm {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.0
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    #[cfg(target_arch = "x86_64")]
+    fn test_halt() {
+        let mut vm = super::Vm::new(64 * 1024 * 1024).unwrap();
+        vm.load_bin(&[0x90, 0x90, 0xf4], 0x10000);
+        vm.run(0x10000).unwrap();
     }
 }

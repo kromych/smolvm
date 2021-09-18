@@ -15,10 +15,8 @@ fn main() -> Result<(), std::io::Error> {
 
     let file = fs::File::open(&kernel_path)?;
     let file = unsafe { memmap2::Mmap::map(&file)? };
-
-    let mut vm = Vm::new(64 * 1024 * 1024)?;
+    let mut vm = Vm::new(64 * 1024 * 1024).unwrap();
     vm.load_elf(&*file);
-    vm.run()?;
 
     Ok(())
 }
