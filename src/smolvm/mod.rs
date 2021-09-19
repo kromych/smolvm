@@ -264,10 +264,17 @@ impl<Cpu: VirtualCpu> Vm<Cpu> {
     pub fn run(&mut self, ip: u64) -> Result<(), std::io::Error> {
         self.cpu.set_instruction_pointer(ip)?;
 
-        log::info!("Starting execution at 0x{:x}", ip);
+        log::info!(
+            "Starting execution at 0x{:x}",
+            self.cpu.get_instruction_pointer()?
+        );
 
         loop {
-            match self.cpu.run()? {
+            let exit = self.cpu.run()?;
+
+            log::info!("Exit at 0x{:x}", self.cpu.get_instruction_pointer()?);
+
+            match exit {
                 VcpuExit::Hlt => {
                     log::info!(
                         "Execution halted at 0x{:x}",
@@ -313,7 +320,13 @@ mod tests {
     #[cfg(target_arch = "aarch64")]
     fn test_halt() {
         let mut vm = super::create_vm(64 * 1024 * 1024).unwrap();
-        vm.load_bin(&[0x02, 0x00, 0x00, 0xd4 /* hvc #0x0 */], 0x10000);
+        vm.load_bin(
+            &[
+                0x02, 0x00, 0x00, 0xd4, /* hvc #0x0 */
+                0x00, 0x00, 0x00, 0x14, /* b <this address> */
+            ],
+            0x10000,
+        );
         vm.run(0x10000).unwrap();
     }
 }
