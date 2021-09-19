@@ -1,4 +1,3 @@
-use crate::smolvm::Vm;
 use std::fs;
 
 #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
