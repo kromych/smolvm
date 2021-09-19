@@ -1,21 +1,22 @@
-use kvm_bindings::kvm_userspace_memory_region;
-use kvm_ioctls::Kvm;
-use kvm_ioctls::VmFd;
-
-use self::x86_64::CpuX86_64;
-use kvm_ioctls::VcpuExit;
+use kvm_bindings::{kvm_userspace_memory_region, KVM_SYSTEM_EVENT_SHUTDOWN};
+use kvm_ioctls::{Kvm, VcpuExit, VmFd};
 use object::{
     elf::FileHeader64,
     read::elf::{FileHeader, ProgramHeader},
     Architecture, Endianness, FileKind, Object, ObjectSection, SectionKind,
 };
-use std::ops::Deref;
-use std::ops::DerefMut;
 use std::sync::Arc;
 use std::sync::Mutex;
 
 #[cfg(target_arch = "x86_64")]
 mod x86_64;
+#[cfg(target_arch = "x86_64")]
+use self::x86_64::CpuX86_64;
+
+#[cfg(target_arch = "aarch64")]
+mod aarch64;
+#[cfg(target_arch = "aarch64")]
+use self::aarch64::CpuAarch64;
 
 fn disassemble_x86_64(bytes: &[u8], ip: u64) {
     use iced_x86::Formatter;
@@ -113,13 +114,13 @@ pub trait VirtualCpu {
     fn run(&self) -> Result<VcpuExit, std::io::Error>;
 }
 
-pub struct _Vm<Cpu: VirtualCpu> {
+pub struct Vm<Cpu: VirtualCpu> {
     native_arch: Architecture,
     cpu: Cpu,
     memory: Arc<Mutex<Memory>>,
 }
 
-impl<Cpu: VirtualCpu> _Vm<Cpu> {
+impl<Cpu: VirtualCpu> Vm<Cpu> {
     pub fn new(memory_size: usize) -> Result<Self, std::io::Error> {
         #[cfg(target_arch = "x86_64")]
         let native_arch = Architecture::X86_64;
@@ -274,6 +275,13 @@ impl<Cpu: VirtualCpu> _Vm<Cpu> {
                     );
                     break;
                 }
+                VcpuExit::SystemEvent(KVM_SYSTEM_EVENT_SHUTDOWN, 0) => {
+                    log::info!(
+                        "Execution halted at 0x{:x}",
+                        self.cpu.get_instruction_pointer()?
+                    );
+                    break;
+                }
                 e => panic!("Unsupported Vcpu Exit {:?}", e),
             }
         }
@@ -281,28 +289,14 @@ impl<Cpu: VirtualCpu> _Vm<Cpu> {
     }
 }
 
+#[cfg(target_arch = "aarch64")]
+pub fn create_vm(memory_size: usize) -> Result<Vm<CpuAarch64>, std::io::Error> {
+    Vm::new(memory_size)
+}
+
 #[cfg(target_arch = "x86_64")]
-pub struct Vm(_Vm<CpuX86_64>);
-
-impl Vm {
-    pub fn new(memory_size: usize) -> Result<Self, std::io::Error> {
-        Ok(Self(_Vm::new(memory_size)?))
-    }
-}
-
-impl Deref for Vm {
-    #[cfg(target_arch = "x86_64")]
-    type Target = _Vm<CpuX86_64>;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl DerefMut for Vm {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
-    }
+pub fn create_vm(memory_size: usize) -> Result<Vm<CpuX86_64>, std::io::Error> {
+    Vm::new(memory_size)
 }
 
 #[cfg(test)]
@@ -310,8 +304,16 @@ mod tests {
     #[test]
     #[cfg(target_arch = "x86_64")]
     fn test_halt() {
-        let mut vm = super::Vm::new(64 * 1024 * 1024).unwrap();
+        let mut vm = super::create_vm(64 * 1024 * 1024).unwrap();
         vm.load_bin(&[0x90, 0x90, 0xf4], 0x10000);
+        vm.run(0x10000).unwrap();
+    }
+
+    #[test]
+    #[cfg(target_arch = "aarch64")]
+    fn test_halt() {
+        let mut vm = super::create_vm(64 * 1024 * 1024).unwrap();
+        vm.load_bin(&[0x02, 0x00, 0x00, 0xd4 /* hvc #0x0 */], 0x10000);
         vm.run(0x10000).unwrap();
     }
 }
