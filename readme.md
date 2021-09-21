@@ -19,3 +19,9 @@ To build (add `--release` for the release build):
 ```bash
 $ cargo build --target aarch64-unknown-linux-musl
 ```
+
+To give the Hypervsior entitlement on Mac OS with a
+self-signed certificate:
+```
+codesign -s - --entitlements ./app.entitlements --force 
+```

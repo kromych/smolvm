@@ -62,9 +62,11 @@ fn disassemble_x86_64(bytes: &[u8], ip: u64) {
 }
 
 fn disassemble_aarch64(bytes: &[u8], ip: u64) {
-    // for decoded in bad64::disasm(bytes, ip).flatten() {
-    //     log::info!("0x{:016x}    {:40}", decoded.address(), decoded);
-    // }
+    use bad64;
+
+    for decoded in bad64::disasm(bytes, ip).flatten() {
+        log::info!("0x{:016x}    {:40}", decoded.address(), decoded);
+    }
 }
 
 pub trait SmolVmT {
@@ -183,24 +185,18 @@ pub trait SmolVmT {
     }
 
     fn run(&mut self) -> Result<(), HvError> {
-        {
-            let cpu = self.get_cpu();
-            let mut cpu = cpu.lock().unwrap();
-
-            log::info!(
-                "Starting execution at 0x{:x}",
-                cpu.get_instruction_pointer()?
-            );
-        }
+        let cpu = self.get_cpu();
 
         loop {
-            let cpu = self.get_cpu();
-            let mut cpu = cpu.lock().unwrap();
+            log::info!("Running at 0x{:x}", {
+                let mut cpu = cpu.lock().unwrap();
+                cpu.get_instruction_pointer()?
+            });
 
-            let ip = cpu.get_instruction_pointer()?;
-            log::info!("Exit at 0x{:x}", ip);
-
-            let exit = cpu.run()?;
+            let exit = {
+                let mut cpu = cpu.lock().unwrap();
+                cpu.run()?
+            };
 
             let vm_runnable = self.handle_exit(&exit)?;
             if vm_runnable == VmRunnable::No {
@@ -209,5 +205,33 @@ pub trait SmolVmT {
         }
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::SmolVmT;
+
+    #[test]
+    #[cfg(target_arch = "x86_64")]
+    fn test_halt() {
+        let mut vm = super::smolvm::create_vm(64 * 1024 * 1024).unwrap();
+        vm.load_bin(&[0x90, 0x90, 0xf4], 0x10000);
+        vm.run().unwrap();
+    }
+
+    #[test]
+    #[cfg(target_arch = "aarch64")]
+    fn test_halt() {
+        let mut vm = super::create_vm(64 * 1024 * 1024).unwrap();
+        vm.load_bin(
+            &[
+                0x40, 0x00, 0x80, 0xD2, // mov x0, #2
+                0x02, 0x00, 0x00, 0xD4, // hvc #0
+                0x00, 0x00, 0x00, 0x14, /* b <this address> */
+            ],
+            0x20000,
+        );
+        vm.run().unwrap();
     }
 }
