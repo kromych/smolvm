@@ -21,10 +21,6 @@ impl Cpu {
         Ok(())
     }
 
-    pub fn map(&self, _pfn: u64, _virt_addr: u64) {
-        todo!()
-    }
-
     pub fn run(&mut self) -> Result<CpuExit, HypervisorError> {
         let result = self.vcpu.run()?;
         Ok(result)

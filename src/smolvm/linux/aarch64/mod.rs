@@ -9,13 +9,13 @@ use std::sync::Mutex;
 
 pub struct Cpu {
     vcpu_fd: VcpuFd,
-    memory: Arc<Mutex<Memory>>,
+    _memory: Arc<Mutex<Memory>>,
 }
 
 impl Cpu {
     pub fn new(
         vm_fd: &kvm_ioctls::VmFd,
-        memory: Arc<Mutex<Memory>>,
+        _memory: Arc<Mutex<Memory>>,
     ) -> Result<Self, std::io::Error> {
         let vcpu_fd = vm_fd.create_vcpu(0)?;
 
@@ -24,15 +24,11 @@ impl Cpu {
         kvi.features[0] |= 1 << KVM_ARM_VCPU_PSCI_0_2;
         vcpu_fd.vcpu_init(&kvi)?;
 
-        Ok(Self { vcpu_fd, memory })
+        Ok(Self { vcpu_fd, _memory })
     }
 
     pub fn init(&mut self) -> Result<(), std::io::Error> {
         Ok(())
-    }
-
-    pub fn map(&self, _pfn: u64, _virt_addr: u64) {
-        todo!()
     }
 
     pub fn run(&mut self) -> Result<VcpuExit, std::io::Error> {

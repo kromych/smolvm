@@ -8,6 +8,7 @@ mod linux;
 #[cfg(target_os = "linux")]
 pub use linux::{Cpu, CpuExit, HvError, Memory, SmolVm};
 
+#[allow(dead_code)]
 #[derive(PartialEq)]
 pub enum VmRunnable {
     No,
@@ -62,8 +63,6 @@ fn disassemble_x86_64(bytes: &[u8], ip: u64) {
 }
 
 fn disassemble_aarch64(bytes: &[u8], ip: u64) {
-    use bad64;
-
     for decoded in bad64::disasm(bytes, ip).flatten() {
         log::info!("0x{:016x}    {:40}", decoded.address(), decoded);
     }
@@ -188,16 +187,10 @@ pub trait SmolVmT {
         let cpu = self.get_cpu();
 
         loop {
-            log::info!("Running at 0x{:x}", {
-                let mut cpu = cpu.lock().unwrap();
-                cpu.get_instruction_pointer()?
-            });
+            let mut cpu = cpu.lock().unwrap();
+            log::info!("Running at 0x{:x}", cpu.get_instruction_pointer()?);
 
-            let exit = {
-                let mut cpu = cpu.lock().unwrap();
-                cpu.run()?
-            };
-
+            let exit = cpu.run()?;
             let vm_runnable = self.handle_exit(&exit)?;
             if vm_runnable == VmRunnable::No {
                 break;
@@ -215,7 +208,7 @@ mod tests {
     #[test]
     #[cfg(target_arch = "x86_64")]
     fn test_halt() {
-        let mut vm = super::smolvm::create_vm(64 * 1024 * 1024).unwrap();
+        let mut vm = super::create_vm(64 * 1024 * 1024).unwrap();
         vm.load_bin(&[0x90, 0x90, 0xf4], 0x10000);
         vm.run().unwrap();
     }

@@ -12,10 +12,6 @@ impl Cpu {
         Ok(())
     }
 
-    pub fn map(&mut self, _pfn: u64, _virt_addr: u64) {
-        todo!()
-    }
-
     pub fn run(&mut self) -> Result<CpuExit, std::io::Error> {
         Ok(CpuExit {})
     }

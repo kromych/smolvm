@@ -1,3 +1,7 @@
+# export CC_aarch64_unknown_linux_musl=/opt/gcc-linaro-7.5.0-2019.12-x86_64_aarch64-linux-gnu/bin/aarch64-linux-gnu-gcc
+
 [target.aarch64-unknown-linux-musl]
 linker = "aarch64-linux-gnu-gcc"
+#cc = "aarch64-linux-gnu-gcc"
+#cxx = "aarch64-linux-gnu-g++"
 rustflags = [ "-C", "target-feature=+crt-static", "-C", "link-arg=-lgcc" ]

@@ -25,3 +25,14 @@ self-signed certificate:
 ```
 codesign -s - --entitlements ./app.entitlements --force 
 ```
+
+The project depends on the `bad64` arm64 disassembler which requires
+an arm64 C cross-compiler. To cross-compile for arm64, I used
+the Linaro toolchain and set the environment variable:
+```bash
+export CC_aarch64_unknown_linux_musl=/opt/gcc-linaro-7.5.0-2019.12-x86_64_aarch64-linux-gnu/bin/aarch64-linux-gnu-gcc
+```
+
+For a reason unknown to me, cross-compiling on Fedora 34 also required the
+glibc-devel-2.33-20.fc34.i686 (i.e. 32bit x86 glibc library) as the compiler
+needed the `stubs-32.h` hedader (???).
