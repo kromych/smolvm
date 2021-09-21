@@ -1,5 +1,19 @@
-use kvm_bindings::{kvm_userspace_memory_region, KVM_SYSTEM_EVENT_SHUTDOWN};
-use kvm_ioctls::{Kvm, VcpuExit, VmFd};
+#[cfg(target_os = "macos")]
+mod darwin;
+#[cfg(target_os = "macos")]
+pub use darwin::{Cpu, CpuExit, HvError, Memory, SmolVm};
+
+#[cfg(target_os = "linux")]
+mod linux;
+#[cfg(target_os = "linux")]
+pub use linux::{Cpu, CpuExit, HvError, Memory, SmolVm};
+
+#[derive(PartialEq)]
+pub enum VmRunnable {
+    No,
+    Yes,
+}
+
 use object::{
     elf::FileHeader64,
     read::elf::{FileHeader, ProgramHeader},
@@ -8,15 +22,9 @@ use object::{
 use std::sync::Arc;
 use std::sync::Mutex;
 
-#[cfg(target_arch = "x86_64")]
-mod x86_64;
-#[cfg(target_arch = "x86_64")]
-use self::x86_64::CpuX86_64;
-
-#[cfg(target_arch = "aarch64")]
-mod aarch64;
-#[cfg(target_arch = "aarch64")]
-use self::aarch64::CpuAarch64;
+pub fn create_vm(memory_size: usize) -> Result<SmolVm, HvError> {
+    SmolVm::new(memory_size)
+}
 
 fn disassemble_x86_64(bytes: &[u8], ip: u64) {
     use iced_x86::Formatter;
@@ -54,109 +62,17 @@ fn disassemble_x86_64(bytes: &[u8], ip: u64) {
 }
 
 fn disassemble_aarch64(bytes: &[u8], ip: u64) {
-    for decoded in bad64::disasm(bytes, ip).flatten() {
-        log::info!("0x{:016x}    {:40}", decoded.address(), decoded);
-    }
+    // for decoded in bad64::disasm(bytes, ip).flatten() {
+    //     log::info!("0x{:016x}    {:40}", decoded.address(), decoded);
+    // }
 }
 
-pub struct Memory {
-    memory: *mut u8,
-    memory_size: usize,
-}
-
-impl Memory {
-    pub fn new(memory_size: usize) -> Result<Self, std::io::Error> {
-        let memory = Self::mmap_anonymous(memory_size);
-
-        Ok(Self {
-            memory,
-            memory_size,
-        })
-    }
-
-    pub fn as_slice_mut(&mut self) -> &mut [u8] {
-        unsafe { std::slice::from_raw_parts_mut(self.memory, self.memory_size) }
-    }
-
-    pub fn start_addr(&self) -> *const u8 {
-        self.memory
-    }
-
-    fn mmap_anonymous(size: usize) -> *mut u8 {
-        use std::ptr::null_mut;
-
-        let addr = unsafe {
-            libc::mmap(
-                null_mut(),
-                size,
-                libc::PROT_READ | libc::PROT_WRITE,
-                libc::MAP_ANONYMOUS | libc::MAP_SHARED | libc::MAP_NORESERVE,
-                -1,
-                0,
-            )
-        };
-        if addr == libc::MAP_FAILED {
-            panic!("mmap failed.");
-        }
-
-        addr as *mut u8
-    }
-}
-
-pub trait VirtualCpu {
-    fn new(vm_fd: &VmFd, memory: Arc<Mutex<Memory>>) -> Result<Self, std::io::Error>
-    where
-        Self: Sized;
-    fn init(&self) -> Result<(), std::io::Error>;
-    fn map(&self, pfn: u64, virt_addr: u64);
-    fn set_instruction_pointer(&self, ip: u64) -> Result<(), std::io::Error>;
-    fn get_instruction_pointer(&self) -> Result<u64, std::io::Error>;
-    fn run(&self) -> Result<VcpuExit, std::io::Error>;
-}
-
-pub struct Vm<Cpu: VirtualCpu> {
-    native_arch: Architecture,
-    cpu: Cpu,
-    memory: Arc<Mutex<Memory>>,
-}
-
-impl<Cpu: VirtualCpu> Vm<Cpu> {
-    pub fn new(memory_size: usize) -> Result<Self, std::io::Error> {
-        #[cfg(target_arch = "x86_64")]
-        let native_arch = Architecture::X86_64;
-
-        #[cfg(target_arch = "aarch64")]
-        let native_arch = Architecture::Aarch64;
-
-        let kvm_fd = Kvm::new()?;
-        let vm_fd = kvm_fd.create_vm()?;
-        let memory = Arc::new(Mutex::new(Memory::new(memory_size)?));
-
-        {
-            let memory = memory.clone();
-            let memory = memory.lock().unwrap();
-            unsafe {
-                vm_fd.set_user_memory_region(kvm_userspace_memory_region {
-                    slot: 0,
-                    guest_phys_addr: 0,
-                    memory_size: memory_size as u64,
-                    userspace_addr: memory.start_addr() as u64,
-                    flags: 0,
-                })?;
-            }
-        }
-
-        let cpu = Cpu::new(&vm_fd, memory.clone())?;
-        cpu.init()?;
-
-        Ok(Self {
-            native_arch,
-            cpu,
-            memory,
-        })
-    }
-
-    pub fn load_elf(&mut self, elf_data: &[u8]) {
+pub trait SmolVmT {
+    fn get_native_arch(&self) -> Architecture;
+    fn get_memory(&self) -> Arc<Mutex<Memory>>;
+    fn get_cpu(&self) -> Arc<Mutex<Cpu>>;
+    fn handle_exit(&mut self, exit: &CpuExit) -> Result<VmRunnable, HvError>;
+    fn load_elf(&mut self, elf_data: &[u8]) {
         log::info!("File size {} bytes", elf_data.len());
 
         let obj_file = object::File::parse(elf_data).unwrap();
@@ -183,15 +99,15 @@ impl<Cpu: VirtualCpu> Vm<Cpu> {
                         let align = segment.p_align(endian);
 
                         log::info!(
-                            "Segment #{}: offset 0x{:x}, virt.address 0x{:x}, phys.addr 0x{:x}, file size 0x{:x}, memory size 0x{:x}, align 0x{:x}",
-                                index,
-                                offset,
-                                virt_addr,
-                                phys_addr,
-                                file_size,
-                                memory_size,
-                                align
-                            );
+                        "Segment #{}: offset 0x{:x}, virt.address 0x{:x}, phys.addr 0x{:x}, file size 0x{:x}, memory size 0x{:x}, align 0x{:x}",
+                            index,
+                            offset,
+                            virt_addr,
+                            phys_addr,
+                            file_size,
+                            memory_size,
+                            align
+                        );
                     }
                 }
             }
@@ -241,17 +157,18 @@ impl<Cpu: VirtualCpu> Vm<Cpu> {
         log::info!("Entry point 0x{:x}", entry);
     }
 
-    pub fn load_bin(&mut self, bin_data: &[u8], load_addr: u64) {
+    fn load_bin(&mut self, bin_data: &[u8], load_addr: u64) {
         log::info!("Loading binary data at 0x{:x}", load_addr);
 
-        if self.native_arch == Architecture::X86_64 {
+        if self.get_native_arch() == Architecture::X86_64 {
             disassemble_x86_64(bin_data, load_addr);
-        } else if self.native_arch == Architecture::Aarch64 {
+        } else if self.get_native_arch() == Architecture::Aarch64 {
             disassemble_aarch64(bin_data, load_addr);
         }
 
-        let mut memory = self.memory.lock().unwrap();
-        let memory = &mut memory.as_slice_mut();
+        let memory = self.get_memory();
+        let mut memory = memory.lock().unwrap();
+        let memory = memory.as_slice_mut();
         if bin_data.len() + load_addr as usize > memory.len() {
             panic!("Out of memory");
         }
@@ -259,84 +176,38 @@ impl<Cpu: VirtualCpu> Vm<Cpu> {
         for i in 0..bin_data.len() {
             memory[load_addr as usize + i] = bin_data[i];
         }
+
+        let cpu = self.get_cpu();
+        let mut cpu = cpu.lock().unwrap();
+        cpu.set_instruction_pointer(load_addr).unwrap();
     }
 
-    pub fn run(&mut self, ip: u64) -> Result<(), std::io::Error> {
-        self.cpu.set_instruction_pointer(ip)?;
+    fn run(&mut self) -> Result<(), HvError> {
+        {
+            let cpu = self.get_cpu();
+            let mut cpu = cpu.lock().unwrap();
 
-        log::info!(
-            "Starting execution at 0x{:x}",
-            self.cpu.get_instruction_pointer()?
-        );
+            log::info!(
+                "Starting execution at 0x{:x}",
+                cpu.get_instruction_pointer()?
+            );
+        }
 
         loop {
-            let exit = self.cpu.run()?;
+            let cpu = self.get_cpu();
+            let mut cpu = cpu.lock().unwrap();
 
-            log::info!("Exit at 0x{:x}", self.cpu.get_instruction_pointer()?);
+            let ip = cpu.get_instruction_pointer()?;
+            log::info!("Exit at 0x{:x}", ip);
 
-            match exit {
-                VcpuExit::Hlt => {
-                    log::info!(
-                        "Execution halted at 0x{:x}",
-                        self.cpu.get_instruction_pointer()?
-                    );
-                    break;
-                }
-                VcpuExit::SystemEvent(KVM_SYSTEM_EVENT_SHUTDOWN, 0) => {
-                    log::info!(
-                        "Execution halted at 0x{:x}",
-                        self.cpu.get_instruction_pointer()?
-                    );
-                    break;
-                }
-                e => panic!("Unsupported Vcpu Exit {:?}", e),
+            let exit = cpu.run()?;
+
+            let vm_runnable = self.handle_exit(&exit)?;
+            if vm_runnable == VmRunnable::No {
+                break;
             }
         }
+
         Ok(())
-    }
-}
-
-#[cfg(target_arch = "aarch64")]
-pub fn create_vm(memory_size: usize) -> Result<Vm<CpuAarch64>, std::io::Error> {
-    Vm::new(memory_size)
-}
-
-#[cfg(target_arch = "x86_64")]
-pub fn create_vm(memory_size: usize) -> Result<Vm<CpuX86_64>, std::io::Error> {
-    Vm::new(memory_size)
-}
-
-#[cfg(test)]
-mod tests {
-    #[test]
-    #[cfg(target_arch = "x86_64")]
-    fn test_halt() {
-        let mut vm = super::create_vm(64 * 1024 * 1024).unwrap();
-        vm.load_bin(&[0x90, 0x90, 0xf4], 0x10000);
-        vm.run(0x10000).unwrap();
-    }
-
-    #[test]
-    #[cfg(target_arch = "aarch64")]
-    fn test_halt() {
-        let mut vm = super::create_vm(64 * 1024 * 1024).unwrap();
-        vm.load_bin(
-            &[
-                0x40, 0x20, 0x80, 0x52, /* mov w0, #0x102 */
-                0x00, 0x01, 0x00, 0xb9, /* str w0, [x8] */
-                0x81, 0x60, 0x80, 0x52, /* mov w1, #0x304 */
-                0x02, 0x00, 0x80, 0x52, /* mov w2, #0x0 */
-                0x20, 0x01, 0x40, 0xb9, /* ldr w0, [x9] */
-                0x1f, 0x18, 0x14, 0x71, /* cmp w0, #0x506 */
-                0x20, 0x00, 0x82, 0x1a, /* csel w0, w1, w2, eq */
-                0x20, 0x01, 0x00, 0xb9, /* str w0, [x9] */
-                0x00, 0x80, 0xb0, 0x52, /* mov w0, #0x84000000 */
-                0x00, 0x00, 0x1d, 0x32, /* orr w0, w0, #0x08 */
-                0x02, 0x00, 0x00, 0xd4, /* hvc #0x0 */
-                0x00, 0x00, 0x00, 0x14, /* b <this address> */
-            ],
-            0x10000,
-        );
-        vm.run(0x10000).unwrap();
     }
 }

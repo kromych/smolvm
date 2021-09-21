@@ -6,10 +6,7 @@ edition = "2018"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-libc = ">=0.2.39"
 object = "0.26"
-kvm-bindings = "0.5"
-kvm-ioctls = "0.10"
 clap = "2.33"
 env_logger="0.9"
 log="0.4"
@@ -19,13 +16,15 @@ static_assertions = "1.1"
 field-offset = "0.3"
 memmap2 = "0.3"
 iced-x86 = "1.14"
-bad64 = "0.4"
+#bad64 = "0.4"
 
-#[target.'cfg(target_arch = "x86_64")'.dependencies]
-#x86 = "0.41"
-#x86_64 = "0.14"
+[target.'cfg(target_os = "linux")'.dependencies]
+libc = ">=0.2.39"
+kvm-bindings = "0.5"
+kvm-ioctls = "0.10"
 
-#[target.'cfg(target_arch = "aarch64")'.dependencies]
+[target.'cfg(target_os = "macos")'.dependencies]
+ahv = "0.1"
 
 [dev-dependencies]
 byteorder = ">=1.2.1"

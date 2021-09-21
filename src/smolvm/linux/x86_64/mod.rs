@@ -3,10 +3,10 @@
 mod boot_params;
 mod cpu;
 
-use super::Memory;
-use super::VirtualCpu;
 pub use boot_params::*;
 pub use cpu::*;
+
+use super::Memory;
 use kvm_bindings::kvm_dtable;
 use kvm_bindings::kvm_msr_entry;
 use kvm_bindings::kvm_segment;
@@ -48,19 +48,22 @@ fn get_x86_64_dtable_entry(kvm_entry: &kvm_segment) -> [u64; 2] {
     ]
 }
 
-pub struct CpuX86_64 {
+pub struct Cpu {
     vcpu_fd: VcpuFd,
     memory: Arc<Mutex<Memory>>,
 }
 
-impl VirtualCpu for CpuX86_64 {
-    fn new(vm_fd: &kvm_ioctls::VmFd, memory: Arc<Mutex<Memory>>) -> Result<Self, std::io::Error> {
+impl Cpu {
+    pub fn new(
+        vm_fd: &kvm_ioctls::VmFd,
+        memory: Arc<Mutex<Memory>>,
+    ) -> Result<Self, std::io::Error> {
         let vcpu_fd = vm_fd.create_vcpu(0)?;
 
         Ok(Self { vcpu_fd, memory })
     }
 
-    fn init(&self) -> Result<(), std::io::Error> {
+    pub fn init(&mut self) -> Result<(), std::io::Error> {
         const GDT_OFFSET: u64 = 0x2000;
         const TSS_OFFSET: u64 = 0x3000;
         const PML4T_OFFSET: u64 = 0x4000;
@@ -195,16 +198,16 @@ impl VirtualCpu for CpuX86_64 {
         Ok(())
     }
 
-    fn map(&self, _pfn: u64, _virt_addr: u64) {
+    pub fn map(&self, _pfn: u64, _virt_addr: u64) {
         todo!()
     }
 
-    fn run(&self) -> Result<VcpuExit, std::io::Error> {
+    pub fn run(&mut self) -> Result<VcpuExit, std::io::Error> {
         let result = self.vcpu_fd.run()?;
         Ok(result)
     }
 
-    fn set_instruction_pointer(&self, ip: u64) -> Result<(), std::io::Error> {
+    pub fn set_instruction_pointer(&mut self, ip: u64) -> Result<(), std::io::Error> {
         let mut regs = self.vcpu_fd.get_regs()?;
         regs.rip = ip;
         self.vcpu_fd.set_regs(&regs)?;
@@ -212,7 +215,7 @@ impl VirtualCpu for CpuX86_64 {
         Ok(())
     }
 
-    fn get_instruction_pointer(&self) -> Result<u64, std::io::Error> {
+    pub fn get_instruction_pointer(&mut self) -> Result<u64, std::io::Error> {
         let regs = self.vcpu_fd.get_regs()?;
 
         Ok(regs.rip)
