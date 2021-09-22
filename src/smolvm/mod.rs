@@ -16,7 +16,7 @@ pub enum VmRunnable {
 }
 
 use object::{
-    elf::FileHeader64,
+    elf::{FileHeader64, PF_R, PF_W, PF_X},
     read::elf::{FileHeader, ProgramHeader},
     Architecture, Endianness, FileKind, Object, ObjectSection, SectionKind,
 };
@@ -63,9 +63,30 @@ fn disassemble_x86_64(bytes: &[u8], ip: u64) {
 }
 
 fn disassemble_aarch64(bytes: &[u8], ip: u64) {
-    for decoded in bad64::disasm(bytes, ip).flatten() {
-        log::info!("0x{:016x}    {:40}", decoded.address(), decoded);
-    }
+    (ip..)
+        .step_by(4)
+        .zip(bytes.chunks(4))
+        .map(
+            |(addr, bytes)| match std::convert::TryInto::try_into(bytes) {
+                Ok(v) => {
+                    let vv = u32::from_le_bytes(v);
+
+                    match bad64::decode(vv, addr) {
+                        Ok(instr) => {
+                            let instr = format!("{}", instr);
+                            log::info!("0x{:016x}    {:48} # {:02x?}", addr, instr, v)
+                        }
+                        Err(e) => {
+                            let err_str = format!("Error: '{}'", e);
+                            let byte_str = format!("{:02x?}", v);
+                            log::info!("0x{:016x}    {:48} # {:02x?}", addr, byte_str, err_str)
+                        }
+                    };
+                }
+                Err(_) => {}
+            },
+        )
+        .for_each(drop);
 }
 
 pub trait SmolVmT {
@@ -74,6 +95,13 @@ pub trait SmolVmT {
     fn get_cpu(&self) -> Arc<Mutex<Cpu>>;
     fn handle_exit(&mut self, exit: &CpuExit) -> Result<VmRunnable, HvError>;
     fn load_elf(&mut self, elf_data: &[u8]) {
+        let str_perms = |flags: u32| {
+            let r = if flags & PF_R != 0 { 'R' } else { '-' };
+            let w = if flags & PF_W != 0 { 'W' } else { '-' };
+            let x = if flags & PF_X != 0 { 'X' } else { '-' };
+
+            format!("{}{}{}", r, w, x)
+        };
         log::info!("File size {} bytes", elf_data.len());
 
         let obj_file = object::File::parse(elf_data).unwrap();
@@ -98,16 +126,19 @@ pub trait SmolVmT {
                         let file_size = segment.p_filesz(endian);
                         let memory_size = segment.p_memsz(endian);
                         let align = segment.p_align(endian);
+                        let flags = segment.p_flags(endian);
 
                         log::info!(
-                        "Segment #{}: offset 0x{:x}, virt.address 0x{:x}, phys.addr 0x{:x}, file size 0x{:x}, memory size 0x{:x}, align 0x{:x}",
+                        "Segment #{}: offset 0x{:x}, virt.address 0x{:x}, phys.addr 0x{:x}, file size 0x{:x}, memory size 0x{:x}, align 0x{:x}, flags 0x{:x}({})",
                             index,
                             offset,
                             virt_addr,
                             phys_addr,
                             file_size,
                             memory_size,
-                            align
+                            align,
+                            flags,
+                            str_perms(flags)
                         );
                     }
                 }
@@ -156,6 +187,11 @@ pub trait SmolVmT {
 
         let entry = obj_file.entry();
         log::info!("Entry point 0x{:x}", entry);
+
+        if arch != self.get_native_arch() {
+            log::error!("Loading is not supported for foreign binaries");
+            panic!();
+        }
     }
 
     fn load_bin(&mut self, bin_data: &[u8], load_addr: u64) {
