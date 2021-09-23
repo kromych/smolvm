@@ -72,7 +72,7 @@ fn disassemble_aarch64(bytes: &[u8], ip: u64) {
                         Err(e) => {
                             let err_str = format!("Error: '{}'", e);
                             let byte_str = format!("{:02x?}", v);
-                            log::info!("0x{:016x}    {:48} # {:02x?}", addr, byte_str, err_str)
+                            log::info!("0x{:016x}    {:48} # {}", addr, byte_str, err_str)
                         }
                     };
                 }
@@ -151,7 +151,7 @@ pub trait SmolVmT {
                             segments_to_load.push(SegmentToLoad {
                                 offset,
                                 _virt_addr: virt_addr,
-                                phys_addr,
+                                phys_addr: phys_addr & !0xffff800000000000, /* TODO why? */
                                 file_size,
                                 _memory_size: memory_size,
                                 _align: align,
