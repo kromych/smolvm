@@ -237,7 +237,8 @@ pub trait SmolVmT {
 
         let cpu = self.get_cpu();
         let mut cpu = cpu.lock().unwrap();
-        cpu.set_instruction_pointer(entry).unwrap();
+        cpu.set_instruction_pointer(entry & !0xffff800000000000 /* TODO hack */)
+            .unwrap();
     }
 
     fn load_bin(&mut self, bin_data: &[u8], load_addr: u64) {
