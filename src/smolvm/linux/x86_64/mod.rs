@@ -11,9 +11,38 @@ use kvm_bindings::{kvm_cpuid2, kvm_dtable, kvm_msr_entry, kvm_segment, Msrs};
 use kvm_ioctls::{VcpuExit, VcpuFd};
 use raw_cpuid::CpuId;
 use std::sync::{Arc, Mutex};
+use zerocopy::AsBytes;
 
 // The second entry matters for TSS and LDT only
-fn get_x86_64_dtable_entry(kvm_entry: &kvm_segment) -> [u64; 2] {
+fn get_x86_64_dtable_64bit_entry(kvm_entry: &kvm_segment) -> u64 {
+    if kvm_entry.s == 0 {
+        panic!("Invalid 64-bit entry")
+    };
+
+    let limit_low: u16 = (kvm_entry.limit & 0xffff) as u16;
+    let base_low: u16 = (kvm_entry.base & 0xffff) as u16;
+    let base_middle: u8 = ((kvm_entry.base >> 16) & 0xff) as u8;
+
+    let limit_high: u8 = ((kvm_entry.limit >> 16) & 0xf) as u8;
+    let attr = (kvm_entry.type_ as u16 & 0xf)
+        | (kvm_entry.s as u16 & 0x1) << 4
+        | (kvm_entry.dpl as u16 & 0x3) << 5
+        | (kvm_entry.present as u16 & 0x1) << 7
+        | (limit_high as u16 & 0xf) << 8
+        | (kvm_entry.l as u16 & 0x1) << 13
+        | (kvm_entry.db as u16 & 0x1) << 14
+        | (kvm_entry.g as u16 & 0x1) << 15;
+
+    let base_high: u8 = ((kvm_entry.base >> 24) & 0xff) as u8;
+
+    limit_low as u64
+        | ((base_low as u64) << 16)
+        | ((base_middle as u64) << 32)
+        | ((attr as u64) << 40)
+        | ((base_high as u64) << 48)
+}
+
+fn get_x86_64_dtable_128bit_entry(kvm_entry: &kvm_segment) -> [u64; 2] {
     let limit_low: u16 = (kvm_entry.limit & 0xffff) as u16;
     let base_low: u16 = (kvm_entry.base & 0xffff) as u16;
     let base_middle: u8 = ((kvm_entry.base >> 16) & 0xff) as u8;
@@ -39,7 +68,7 @@ fn get_x86_64_dtable_entry(kvm_entry: &kvm_segment) -> [u64; 2] {
         if kvm_entry.s == 0 {
             kvm_entry.base >> 32
         } else {
-            0
+            panic!("Invalid 128-bit GDT entry")
         },
     ]
 }
@@ -82,7 +111,6 @@ impl Cpu {
 
         let vcpu_fd = &self.vcpu_fd;
         let mut memory = self.memory.lock().unwrap();
-        let memory = memory.as_slice_mut();
 
         let mut sregs = vcpu_fd.get_sregs()?;
 
@@ -140,50 +168,38 @@ impl Cpu {
                 padding: [0; 3],
             };
 
-            let cs_hw = get_x86_64_dtable_entry(&sregs.cs);
-            let ss_hw = get_x86_64_dtable_entry(&sregs.ss);
-            let tss_hw = get_x86_64_dtable_entry(&sregs.tr);
-
-            let gdt = unsafe {
-                std::slice::from_raw_parts_mut(
-                    (((memory as *const _) as *mut u64) as u64 + GDT_OFFSET) as *mut u64,
-                    64,
-                )
-            };
-
-            gdt[BOOT_CODE_CS_GDT_INDEX as usize] = cs_hw[0];
-            gdt[BOOT_CODE_SS_GDT_INDEX as usize] = ss_hw[0];
-            gdt[BOOT_CODE_TSS_GDT_INDEX as usize] = tss_hw[0];
-            gdt[(BOOT_CODE_TSS_GDT_INDEX + 1) as usize] = tss_hw[1];
+            memory.write(
+                GDT_OFFSET + (BOOT_CODE_CS_GDT_INDEX << 3) as u64,
+                get_x86_64_dtable_64bit_entry(&sregs.cs).as_bytes(),
+            );
+            memory.write(
+                GDT_OFFSET + (BOOT_CODE_SS_GDT_INDEX << 3) as u64,
+                get_x86_64_dtable_64bit_entry(&sregs.ss).as_bytes(),
+            );
+            memory.write(
+                GDT_OFFSET + (BOOT_CODE_TSS_GDT_INDEX << 3) as u64,
+                get_x86_64_dtable_128bit_entry(&sregs.tr).as_bytes(),
+            );
         }
 
-        // Set up page tables for identical mapping
+        // Set up page tables for identical mapping of the first 4GiB
         {
-            let pml4t = unsafe {
-                std::slice::from_raw_parts_mut(
-                    (((memory as *const _) as *mut u64) as u64 + PML4T_OFFSET) as *mut u64,
-                    512,
-                )
-            };
-            let pdpt = unsafe {
-                std::slice::from_raw_parts_mut(
-                    (((memory as *const _) as *mut u64) as u64 + PDPT_OFFSET) as *mut u64,
-                    512,
-                )
-            };
-            let pdt = unsafe {
-                std::slice::from_raw_parts_mut(
-                    (((memory as *const _) as *mut u64) as u64 + PDT_OFFSET) as *mut u64,
-                    512,
-                )
-            };
+            memory.write(
+                PML4T_OFFSET,
+                [PDPT_OFFSET | (PML4Flags::P | PML4Flags::RW).bits()].as_bytes(),
+            );
+            memory.write(
+                PDPT_OFFSET,
+                [PDT_OFFSET | (PDPTFlags::P | PDPTFlags::RW).bits()].as_bytes(),
+            );
 
-            pml4t[0] = PDPT_OFFSET | (PML4Flags::P | PML4Flags::RW).bits();
-            pdpt[0] = PDT_OFFSET | (PDPTFlags::P | PDPTFlags::RW).bits();
-
-            for large_page_index in 0..PAGE_SIZE as usize / std::mem::size_of::<u64>() {
-                pdt[large_page_index] = ((large_page_index as u64) * LARGE_PAGE_SIZE)
-                    | (PDFlags::P | PDFlags::RW | PDFlags::PS).bits();
+            for large_page_index in 0..PAGE_SIZE / std::mem::size_of::<u64>() as u64 {
+                memory.write(
+                    PDT_OFFSET + large_page_index * 8,
+                    [((large_page_index as u64) * LARGE_PAGE_SIZE)
+                        | (PDFlags::P | PDFlags::RW | PDFlags::PS).bits()]
+                    .as_bytes(),
+                );
             }
         }
 

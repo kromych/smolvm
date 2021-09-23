@@ -1,3 +1,4 @@
+use crate::smolvm::GpaSpan;
 use smolvm::{HvError, SmolVmT};
 use std::fs;
 
@@ -9,7 +10,7 @@ mod smolvm;
 fn main() -> Result<(), HvError> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
 
-    let args: Vec<String> = std::env::args().collect();
+    let args = std::env::args().collect::<Vec<_>>();
 
     if args.len() == 2 {
         run_kernel(&args[1])?
@@ -26,7 +27,15 @@ fn run_kernel(kernel_path: &str) -> Result<(), HvError> {
     let file = fs::File::open(&kernel_path).unwrap();
     let file = unsafe { memmap2::Mmap::map(&file).unwrap() };
 
-    let mut vm = smolvm::create_vm(64 * 1024 * 1024)?;
+    #[cfg(target_arch = "x86_64")]
+    let gpa_start = 0;
+    #[cfg(target_arch = "aarch64")]
+    let gpa_start = 0x1_000_0000;
+
+    let mut vm = smolvm::create_vm(&[GpaSpan {
+        start: gpa_start,
+        size: 64 * 1024 * 1024,
+    }])?;
     vm.load_elf(&*file);
     vm.run()?;
 
@@ -36,21 +45,31 @@ fn run_kernel(kernel_path: &str) -> Result<(), HvError> {
 fn run_until_halt() -> Result<(), HvError> {
     #[cfg(target_arch = "x86_64")]
     {
-        let mut vm = smolvm::create_vm(64 * 1024 * 1024)?;
+        let mut vm = smolvm::create_vm(&[GpaSpan {
+            start: 0,
+            size: 64 * 1024 * 1024,
+        }])?;
         vm.load_bin(&[0x90, 0x90, 0xf4], 0x10000);
         vm.run()?
     }
 
     #[cfg(target_arch = "aarch64")]
     {
-        let mut vm = smolvm::create_vm(64 * 1024 * 1024)?;
+        let mut vm = smolvm::create_vm(&[GpaSpan {
+            start: 0x80_000_000,
+            size: 64 * 1024 * 1024,
+        }])?;
         vm.load_bin(
             &[
-                0x40, 0x00, 0x80, 0xD2, // mov x0, #2
-                0x02, 0x00, 0x00, 0xD4, // hvc #0
+                0x01, 0x00, 0x00, 0x10, /* adr x1, <this address> */
+                0x22, 0x10, 0x00, 0xb9, /* str w2, [x1, #16]; write to this page */
+                0x02, 0x00, 0x00, 0xb9, /* str w2, [x0]; This generates a MMIO Write.*/
+                // 0x00, 0x80, 0xb0, 0x52, /* mov w0, #0x84000000 */
+                // 0x00, 0x00, 0x1d, 0x32, /* orr w0, w0, #0x08 */
+                // 0x02, 0x00, 0x00, 0xd4, /* hvc #0x0 */
                 0x00, 0x00, 0x00, 0x14, /* b <this address> */
             ],
-            0x20000,
+            0x80_000_000,
         );
         vm.run()?
     }

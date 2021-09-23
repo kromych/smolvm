@@ -22,7 +22,7 @@ impl Cpu {
 
         let mut kvi = kvm_bindings::kvm_vcpu_init::default();
         vm_fd.get_preferred_target(&mut kvi)?;
-        kvi.features[0] |= 1 << KVM_ARM_VCPU_PSCI_0_2;
+        //kvi.features[0] |= 1 << KVM_ARM_VCPU_PSCI_0_2;
         vcpu_fd.vcpu_init(&kvi)?;
 
         Ok(Self { vcpu_fd, _memory })
@@ -35,18 +35,18 @@ impl Cpu {
     pub fn run(&mut self) -> Result<VcpuExit, std::io::Error> {
         let mut exit = self.vcpu_fd.run()?;
 
-        match exit {
-            VcpuExit::SystemEvent(KVM_SYSTEM_EVENT_SHUTDOWN, 0) => {
-                let core_reg_base: u64 = 0x6030_0000_0010_0000;
-                let ip = self.vcpu_fd.get_one_reg(core_reg_base + 2 * 32)?;
-                log::info!("Shutdown at 0x{:x}", ip)
-            }
-            e => {
-                let core_reg_base: u64 = 0x6030_0000_0010_0000;
-                let ip = self.vcpu_fd.get_one_reg(core_reg_base + 2 * 32)?;
-                panic!("Unsupported Vcpu Exit {:?} at 0x{:x}", e, ip)
-            }
-        }
+        // match exit {
+        // VcpuExit::SystemEvent(KVM_SYSTEM_EVENT_SHUTDOWN, 0) => {
+        //     let core_reg_base: u64 = 0x6030_0000_0010_0000;
+        //     let ip = self.vcpu_fd.get_one_reg(core_reg_base + 2 * 32)?;
+        //     log::info!("Shutdown at 0x{:x}", ip)
+        // }
+        // e => {
+        let core_reg_base: u64 = 0x6030_0000_0010_0000;
+        let ip = self.vcpu_fd.get_one_reg(core_reg_base + 2 * 32)?;
+        log::info!("Vcpu Exit {:?} at 0x{:x}", exit, ip);
+        //     }
+        // }
 
         Ok(exit)
     }

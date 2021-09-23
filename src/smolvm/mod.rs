@@ -16,8 +16,13 @@ use object::{
 use std::sync::Arc;
 use std::sync::Mutex;
 
-pub fn create_vm(memory_size: usize) -> Result<SmolVm, HvError> {
-    SmolVm::new(memory_size)
+pub struct GpaSpan {
+    pub start: u64,
+    pub size: usize,
+}
+
+pub fn create_vm(gpa_map: &[GpaSpan]) -> Result<SmolVm, HvError> {
+    SmolVm::new(gpa_map)
 }
 
 fn disassemble_x86_64(bytes: &[u8], ip: u64) {
@@ -147,7 +152,7 @@ pub trait SmolVmT {
                             str_perms(flags)
                         );
 
-                        if flags & (PF_R | PF_W | PF_X) != 0 {
+                        if flags & (PF_R | PF_W | PF_X) != 0 && memory_size != 0 {
                             segments_to_load.push(SegmentToLoad {
                                 offset,
                                 _virt_addr: virt_addr,
@@ -213,7 +218,6 @@ pub trait SmolVmT {
 
         let memory = self.get_memory();
         let mut memory = memory.lock().unwrap();
-        let memory = memory.as_slice_mut();
 
         // Not setting protection, the guest is expected to set up
         // that in the page tables for itself
@@ -232,7 +236,7 @@ pub trait SmolVmT {
                 pa_end
             );
 
-            memory[pa_start..pa_end].copy_from_slice(&elf_data[image_start..image_end]);
+            memory.write(pa_start as u64, &elf_data[image_start..image_end]);
         }
 
         let cpu = self.get_cpu();
@@ -252,12 +256,8 @@ pub trait SmolVmT {
 
         let memory = self.get_memory();
         let mut memory = memory.lock().unwrap();
-        let memory = memory.as_slice_mut();
-        if bin_data.len() + load_addr as usize > memory.len() {
-            panic!("Out of memory");
-        }
 
-        memory[load_addr as usize..load_addr as usize + bin_data.len()].copy_from_slice(bin_data);
+        memory.write(load_addr, bin_data);
 
         let cpu = self.get_cpu();
         let mut cpu = cpu.lock().unwrap();
@@ -276,12 +276,17 @@ pub trait SmolVmT {
 
 #[cfg(test)]
 mod tests {
+    use super::GpaSpan;
     use super::SmolVmT;
 
     #[test]
     #[cfg(target_arch = "x86_64")]
     fn test_halt() {
-        let mut vm = super::create_vm(64 * 1024 * 1024).unwrap();
+        let mut vm = super::create_vm(&[GpaSpan {
+            start: 0,
+            size: 64 * 1024 * 1024,
+        }])
+        .unwrap();
         vm.load_bin(&[0x90, 0x90, 0xf4], 0x10000);
         vm.run().unwrap();
     }
@@ -289,14 +294,18 @@ mod tests {
     #[test]
     #[cfg(target_arch = "aarch64")]
     fn test_halt() {
-        let mut vm = super::create_vm(64 * 1024 * 1024).unwrap();
+        let mut vm = super::create_vm(&[GpaSpan {
+            start: 0x80_000_000,
+            size: 64 * 1024 * 1024,
+        }])
+        .unwrap();
         vm.load_bin(
             &[
                 0x40, 0x00, 0x80, 0xD2, // mov x0, #2
                 0x02, 0x00, 0x00, 0xD4, // hvc #0
                 0x00, 0x00, 0x00, 0x14, /* b <this address> */
             ],
-            0x20000,
+            0x80_000_000,
         );
         vm.run().unwrap();
     }
