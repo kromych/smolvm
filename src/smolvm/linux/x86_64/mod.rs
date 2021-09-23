@@ -7,14 +7,10 @@ pub use boot_params::*;
 pub use cpu::*;
 
 use super::Memory;
-use kvm_bindings::kvm_dtable;
-use kvm_bindings::kvm_msr_entry;
-use kvm_bindings::kvm_segment;
-use kvm_bindings::Msrs;
-use kvm_ioctls::VcpuExit;
-use kvm_ioctls::VcpuFd;
-use std::sync::Arc;
-use std::sync::Mutex;
+use kvm_bindings::{kvm_cpuid2, kvm_dtable, kvm_msr_entry, kvm_segment, Msrs};
+use kvm_ioctls::{VcpuExit, VcpuFd};
+use raw_cpuid::CpuId;
+use std::sync::{Arc, Mutex};
 
 // The second entry matters for TSS and LDT only
 fn get_x86_64_dtable_entry(kvm_entry: &kvm_segment) -> [u64; 2] {
@@ -55,20 +51,34 @@ pub struct Cpu {
 
 impl Cpu {
     pub fn new(
+        kvm_fd: &kvm_ioctls::Kvm,
         vm_fd: &kvm_ioctls::VmFd,
         memory: Arc<Mutex<Memory>>,
     ) -> Result<Self, std::io::Error> {
+        let host_cpu_id = CpuId::new();
+        log::info!("Host CPU: {:#x?}", host_cpu_id);
+
         let vcpu_fd = vm_fd.create_vcpu(0)?;
+
+        // Inspect the default CPUID data
+        //let guest_cpu_id = vcpu_fd.get_cpuid2(kvm_bindings::KVM_MAX_CPUID_ENTRIES)?.as_slice();
+
+        // Set all supported CPUID features, no filtering.
+        // Without that, the kernel would fail to set MSRs, etc as support for that
+        // is communicated through CPUID
+        let cpu_id = kvm_fd.get_supported_cpuid(kvm_bindings::KVM_MAX_CPUID_ENTRIES)?;
+        vcpu_fd.set_cpuid2(&cpu_id)?;
 
         Ok(Self { vcpu_fd, memory })
     }
 
     pub fn init(&mut self) -> Result<(), std::io::Error> {
-        const GDT_OFFSET: u64 = 0x2000;
-        const TSS_OFFSET: u64 = 0x3000;
-        const PML4T_OFFSET: u64 = 0x4000;
-        const PDPT_OFFSET: u64 = 0x5000;
-        const PDT_OFFSET: u64 = 0x6000;
+        const STACK_TOP_OFFSET: u64 = 0x3fff0;
+        const GDT_OFFSET: u64 = 0x4000;
+        const TSS_OFFSET: u64 = 0x5000;
+        const PML4T_OFFSET: u64 = 0x6000;
+        const PDPT_OFFSET: u64 = 0x7000;
+        const PDT_OFFSET: u64 = 0x8000;
 
         let vcpu_fd = &self.vcpu_fd;
         let mut memory = self.memory.lock().unwrap();
@@ -193,14 +203,54 @@ impl Cpu {
             ..Default::default()
         }])
         .unwrap();
-        vcpu_fd.set_msrs(&msrs).unwrap();
+        vcpu_fd.set_msrs(&msrs)?;
+
+        let mut regs = vcpu_fd.get_regs()?;
+        regs.rsp = STACK_TOP_OFFSET;
+        regs.rbp = STACK_TOP_OFFSET;
+        regs.rflags = 2;
+        vcpu_fd.set_regs(&regs)?;
+
+        vcpu_fd.set_fpu(&kvm_bindings::kvm_fpu {
+            fcw: 0x37f,
+            mxcsr: 0x1f80,
+            ..Default::default()
+        })?;
+
+        // Single-step the guest
+        // vcpu_fd.set_guest_debug(&kvm_bindings::kvm_guest_debug {
+        //     control: kvm_bindings::KVM_GUESTDBG_ENABLE | kvm_bindings::KVM_GUESTDBG_SINGLESTEP,
+        //     ..Default::default()
+        // })?;
 
         Ok(())
     }
 
     pub fn run(&mut self) -> Result<VcpuExit, std::io::Error> {
-        let result = self.vcpu_fd.run()?;
-        Ok(result)
+        let exit = self.vcpu_fd.run()?;
+
+        match exit {
+            VcpuExit::Hlt => {
+                let regs = self.vcpu_fd.get_regs().unwrap_or_default();
+                let sregs = self.vcpu_fd.get_sregs().unwrap_or_default();
+                log::info!(
+                    "CPU halted, registers {:#x?}, system registers {:#x?}",
+                    regs,
+                    sregs
+                )
+            }
+            e => {
+                let regs = self.vcpu_fd.get_regs().unwrap_or_default();
+                let sregs = self.vcpu_fd.get_sregs().unwrap_or_default();
+
+                panic!(
+                    "Unsupported Vcpu Exit {:?}, registers {:#x?}, system registers {:#x?}",
+                    e, regs, sregs
+                )
+            }
+        }
+
+        Ok(exit)
     }
 
     pub fn set_instruction_pointer(&mut self, ip: u64) -> Result<(), std::io::Error> {

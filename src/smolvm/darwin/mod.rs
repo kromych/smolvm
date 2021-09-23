@@ -10,7 +10,6 @@ pub use self::aarch64::{Cpu, CpuExit};
 
 pub use ahv::HypervisorError as HvError;
 
-use crate::smolvm::VmRunnable;
 use ahv::{MemoryPermission, VirtualCpuExitReason, VirtualMachine};
 use object::Architecture;
 use std::sync::{Arc, Mutex};
@@ -84,17 +83,5 @@ impl crate::smolvm::SmolVmT for SmolVm {
 
     fn get_cpu(&self) -> std::sync::Arc<std::sync::Mutex<Cpu>> {
         self.cpu.clone()
-    }
-
-    fn handle_exit(&mut self, exit: &VirtualCpuExitReason) -> Result<VmRunnable, HvError> {
-        match exit {
-            VirtualCpuExitReason::Exception { exception } => {
-                let ec = (exception.syndrome >> 26) & 0x3f;
-                log::info!("Exception syndrome 0x{:x}", ec);
-
-                return Ok(VmRunnable::No);
-            }
-            e => panic!("Unsupported Vcpu Exit {:?}", e),
-        }
     }
 }

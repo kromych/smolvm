@@ -20,8 +20,6 @@ pub use self::aarch64::Cpu;
 pub use std::io::Error as HvError;
 pub use VcpuExit as CpuExit;
 
-use super::VmRunnable;
-
 pub struct Memory {
     memory: *mut u8,
     memory_size: usize,
@@ -98,7 +96,7 @@ impl SmolVm {
             }
         }
 
-        let mut cpu = Cpu::new(&vm_fd, memory.clone())?;
+        let mut cpu = Cpu::new(&kvm_fd, &vm_fd, memory.clone())?;
         cpu.init()?;
         let cpu = Arc::new(Mutex::new(cpu));
 
@@ -121,17 +119,5 @@ impl crate::SmolVmT for SmolVm {
 
     fn get_cpu(&self) -> std::sync::Arc<std::sync::Mutex<Cpu>> {
         self.cpu.clone()
-    }
-
-    fn handle_exit(&mut self, exit: &VcpuExit) -> Result<VmRunnable, std::io::Error> {
-        match exit {
-            VcpuExit::Hlt => {
-                return Ok(VmRunnable::No);
-            }
-            VcpuExit::SystemEvent(KVM_SYSTEM_EVENT_SHUTDOWN, 0) => {
-                return Ok(VmRunnable::No);
-            }
-            e => panic!("Unsupported Vcpu Exit {:?}", e),
-        }
     }
 }

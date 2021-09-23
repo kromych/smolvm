@@ -14,6 +14,7 @@ pub struct Cpu {
 
 impl Cpu {
     pub fn new(
+        _kvm_fd: &kvm_ioctls::Kvm,
         vm_fd: &kvm_ioctls::VmFd,
         _memory: Arc<Mutex<Memory>>,
     ) -> Result<Self, std::io::Error> {
@@ -32,8 +33,22 @@ impl Cpu {
     }
 
     pub fn run(&mut self) -> Result<VcpuExit, std::io::Error> {
-        let result = self.vcpu_fd.run()?;
-        Ok(result)
+        let mut exit = self.vcpu_fd.run()?;
+
+        match exit {
+            VcpuExit::SystemEvent(KVM_SYSTEM_EVENT_SHUTDOWN, 0) => {
+                let core_reg_base: u64 = 0x6030_0000_0010_0000;
+                let ip = self.vcpu_fd.get_one_reg(core_reg_base + 2 * 32)?;
+                log::info!("Shutdown at 0x{:x}", ip)
+            }
+            e => {
+                let core_reg_base: u64 = 0x6030_0000_0010_0000;
+                let ip = self.vcpu_fd.get_one_reg(core_reg_base + 2 * 32)?;
+                panic!("Unsupported Vcpu Exit {:?} at 0x{:x}", e, ip)
+            }
+        }
+
+        Ok(exit)
     }
 
     pub fn set_instruction_pointer(&mut self, ip: u64) -> Result<(), std::io::Error> {

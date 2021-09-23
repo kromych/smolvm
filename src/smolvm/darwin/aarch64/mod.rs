@@ -22,8 +22,17 @@ impl Cpu {
     }
 
     pub fn run(&mut self) -> Result<CpuExit, HypervisorError> {
-        let result = self.vcpu.run()?;
-        Ok(result)
+        let exit = self.vcpu.run()?;
+
+        match exit {
+            VirtualCpuExitReason::Exception { exception } => {
+                let ec = (exception.syndrome >> 26) & 0x3f;
+                log::info!("Exception syndrome 0x{:x}", ec);
+            }
+            e => panic!("Unsupported Vcpu Exit {:?}", e),
+        }
+
+        Ok(exit)
     }
 
     pub fn set_instruction_pointer(&mut self, ip: u64) -> Result<(), HypervisorError> {

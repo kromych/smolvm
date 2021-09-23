@@ -8,13 +8,6 @@ mod linux;
 #[cfg(target_os = "linux")]
 pub use linux::{Cpu, CpuExit, HvError, Memory, SmolVm};
 
-#[allow(dead_code)]
-#[derive(PartialEq)]
-pub enum VmRunnable {
-    No,
-    Yes,
-}
-
 use object::{
     elf::{FileHeader64, PF_R, PF_W, PF_X},
     read::elf::{FileHeader, ProgramHeader},
@@ -93,8 +86,18 @@ pub trait SmolVmT {
     fn get_native_arch(&self) -> Architecture;
     fn get_memory(&self) -> Arc<Mutex<Memory>>;
     fn get_cpu(&self) -> Arc<Mutex<Cpu>>;
-    fn handle_exit(&mut self, exit: &CpuExit) -> Result<VmRunnable, HvError>;
     fn load_elf(&mut self, elf_data: &[u8]) {
+        #[derive(Default, Clone, Copy)]
+        struct SegmentToLoad {
+            offset: u64,
+            _virt_addr: u64,
+            phys_addr: u64,
+            file_size: u64,
+            _memory_size: u64,
+            _align: u64,
+            _flags: u32,
+        }
+
         let str_perms = |flags: u32| {
             let r = if flags & PF_R != 0 { 'R' } else { '-' };
             let w = if flags & PF_W != 0 { 'W' } else { '-' };
@@ -102,6 +105,9 @@ pub trait SmolVmT {
 
             format!("{}{}{}", r, w, x)
         };
+
+        let mut segments_to_load = Vec::<SegmentToLoad>::new();
+
         log::info!("File size {} bytes", elf_data.len());
 
         let obj_file = object::File::parse(elf_data).unwrap();
@@ -140,6 +146,18 @@ pub trait SmolVmT {
                             flags,
                             str_perms(flags)
                         );
+
+                        if flags & (PF_R | PF_W | PF_X) != 0 {
+                            segments_to_load.push(SegmentToLoad {
+                                offset,
+                                _virt_addr: virt_addr,
+                                phys_addr,
+                                file_size,
+                                _memory_size: memory_size,
+                                _align: align,
+                                _flags: flags,
+                            });
+                        }
                     }
                 }
             }
@@ -192,6 +210,34 @@ pub trait SmolVmT {
             log::error!("Loading is not supported for foreign binaries");
             panic!();
         }
+
+        let memory = self.get_memory();
+        let mut memory = memory.lock().unwrap();
+        let memory = memory.as_slice_mut();
+
+        // Not setting protection, the guest is expected to set up
+        // that in the page tables for itself
+        for segment_to_load in segments_to_load {
+            let size = segment_to_load.file_size as usize;
+            let image_start = segment_to_load.offset as usize;
+            let image_end = image_start + size;
+            let pa_start = segment_to_load.phys_addr as usize;
+            let pa_end = pa_start + size;
+
+            log::info!(
+                "Loading image data from [0x{:x}; 0x{:x}] into [0x{:x}; 0x{:x}]",
+                image_start,
+                image_end,
+                pa_start,
+                pa_end
+            );
+
+            memory[pa_start..pa_end].copy_from_slice(&elf_data[image_start..image_end]);
+        }
+
+        let cpu = self.get_cpu();
+        let mut cpu = cpu.lock().unwrap();
+        cpu.set_instruction_pointer(entry).unwrap();
     }
 
     fn load_bin(&mut self, bin_data: &[u8], load_addr: u64) {
@@ -210,9 +256,7 @@ pub trait SmolVmT {
             panic!("Out of memory");
         }
 
-        for i in 0..bin_data.len() {
-            memory[load_addr as usize + i] = bin_data[i];
-        }
+        memory[load_addr as usize..load_addr as usize + bin_data.len()].copy_from_slice(bin_data);
 
         let cpu = self.get_cpu();
         let mut cpu = cpu.lock().unwrap();
@@ -221,19 +265,11 @@ pub trait SmolVmT {
 
     fn run(&mut self) -> Result<(), HvError> {
         let cpu = self.get_cpu();
+        let mut cpu = cpu.lock().unwrap();
 
         loop {
-            let mut cpu = cpu.lock().unwrap();
-            log::info!("Running at 0x{:x}", cpu.get_instruction_pointer()?);
-
-            let exit = cpu.run()?;
-            let vm_runnable = self.handle_exit(&exit)?;
-            if vm_runnable == VmRunnable::No {
-                break;
-            }
+            cpu.run().map(|_| ())?;
         }
-
-        Ok(())
     }
 }
 
