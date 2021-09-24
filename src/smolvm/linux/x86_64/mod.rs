@@ -7,6 +7,7 @@ pub use boot_params::*;
 pub use cpu::*;
 
 use super::Memory;
+use crate::smolvm::CpuExitReason;
 use kvm_bindings::{kvm_dtable, kvm_msr_entry, kvm_segment, Msrs};
 use kvm_ioctls::{VcpuExit, VcpuFd};
 use raw_cpuid::CpuId;
@@ -85,7 +86,7 @@ impl Cpu {
         memory: Arc<Mutex<Memory>>,
     ) -> Result<Self, std::io::Error> {
         let host_cpu_id = CpuId::new();
-        log::info!("Host CPU: {:#x?}", host_cpu_id);
+        log::trace!("Host CPU: {:#x?}", host_cpu_id);
 
         let vcpu_fd = vm_fd.create_vcpu(0)?;
 
@@ -242,31 +243,51 @@ impl Cpu {
         Ok(())
     }
 
-    pub fn run(&mut self) -> Result<VcpuExit, std::io::Error> {
+    pub fn run(&mut self) -> Result<CpuExitReason, std::io::Error> {
         let exit = self.vcpu_fd.run()?;
 
-        match exit {
-            VcpuExit::Hlt => {
-                let regs = self.vcpu_fd.get_regs().unwrap_or_default();
-                let sregs = self.vcpu_fd.get_sregs().unwrap_or_default();
-                log::info!(
-                    "CPU halted, registers {:#x?}, system registers {:#x?}",
-                    regs,
-                    sregs
-                )
+        let exit_reason = match &exit {
+            VcpuExit::Hlt => CpuExitReason::Halt,
+            VcpuExit::IoIn(port, data) => {
+                if data.len() == 1 {
+                    CpuExitReason::IoByteIn(*port, data[0])
+                } else if data.len() == 2 {
+                    CpuExitReason::IoWordIn(*port, data[0] as u16 | (data[1] as u16) << 8)
+                } else {
+                    CpuExitReason::NotSupported
+                }
             }
-            e => {
-                let regs = self.vcpu_fd.get_regs().unwrap_or_default();
-                let sregs = self.vcpu_fd.get_sregs().unwrap_or_default();
+            VcpuExit::IoOut(port, data) => {
+                if data.len() == 1 {
+                    CpuExitReason::IoByteOut(*port, data[0])
+                } else if data.len() == 2 {
+                    CpuExitReason::IoWordOut(*port, data[0] as u16 | (data[1] as u16) << 8)
+                } else {
+                    CpuExitReason::NotSupported
+                }
+            }
+            e => CpuExitReason::NotSupported,
+        };
 
-                panic!(
-                    "Unsupported Vcpu Exit {:?}, registers {:#x?}, system registers {:#x?}",
-                    e, regs, sregs
-                )
-            }
+        let regs = self.vcpu_fd.get_regs().unwrap_or_default();
+        let sregs = self.vcpu_fd.get_sregs().unwrap_or_default();
+        if exit_reason == CpuExitReason::NotSupported {
+            log::error!(
+                "Exit {:#x?}, registers {:x?}, system registers {:x?}",
+                exit,
+                regs,
+                sregs
+            );
+        } else {
+            log::trace!(
+                "Exit {:#x?}, registers {:x?}, system registers {:x?}",
+                exit,
+                regs,
+                sregs
+            );
         }
 
-        Ok(exit)
+        Ok(exit_reason)
     }
 
     pub fn set_instruction_pointer(&mut self, ip: u64) -> Result<(), std::io::Error> {

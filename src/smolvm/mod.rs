@@ -16,6 +16,8 @@ use object::{
 use std::sync::Arc;
 use std::sync::Mutex;
 
+mod uart;
+
 pub struct GpaSpan {
     pub start: u64,
     pub size: usize,
@@ -153,6 +155,16 @@ impl Memory {
 
         None
     }
+}
+
+#[derive(PartialEq)]
+pub enum CpuExitReason {
+    NotSupported,
+    Halt,
+    IoByteIn(u16 /* port */, u8 /* data */),
+    IoByteOut(u16 /* port */, u8 /* data */),
+    IoWordIn(u16 /* port */, u16 /* data */),
+    IoWordOut(u16 /* port */, u16 /* data */),
 }
 
 pub trait SmolVmT {
@@ -344,14 +356,24 @@ pub trait SmolVmT {
         cpu.set_instruction_pointer(load_addr).unwrap();
     }
 
-    fn run(&mut self) -> Result<(), HvError> {
+    fn run_once(&mut self) -> Result<CpuExitReason, HvError> {
+        let cpu = self.get_cpu();
+        let mut cpu = cpu.lock().unwrap();
+
+        Ok(cpu.run()?)
+    }
+
+    fn run(&mut self) -> Result<CpuExitReason, HvError> {
         let cpu = self.get_cpu();
         let mut cpu = cpu.lock().unwrap();
 
         loop {
-            cpu.run().map(|_| ())?;
+            let exit_reason = cpu.run()?;
+
+            if exit_reason == CpuExitReason::NotSupported {
+                return Ok(exit_reason);
+            }
         }
-        Ok(())
     }
 }
 

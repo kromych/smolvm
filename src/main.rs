@@ -50,7 +50,7 @@ fn run_until_halt() -> Result<(), HvError> {
             size: 64 * 1024 * 1024,
         }])?;
         vm.load_bin(&[0x90, 0x90, 0xf4], 0x10000);
-        vm.run()?
+        vm.run_once().map(|_| ())?
     }
 
     #[cfg(target_arch = "aarch64")]
@@ -71,7 +71,7 @@ fn run_until_halt() -> Result<(), HvError> {
             ],
             0x80_000_000,
         );
-        vm.run()?
+        vm.run_once().map(|_| ())?
     }
 
     Ok(())
