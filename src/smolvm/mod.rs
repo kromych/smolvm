@@ -64,26 +64,23 @@ fn disassemble_aarch64(bytes: &[u8], ip: u64) {
     (ip..)
         .step_by(4)
         .zip(bytes.chunks(4))
-        .map(
-            |(addr, bytes)| match std::convert::TryInto::try_into(bytes) {
-                Ok(v) => {
-                    let vv = u32::from_le_bytes(v);
+        .map(|(addr, bytes)| {
+            if let Ok(v) = std::convert::TryInto::try_into(bytes) {
+                let vv = u32::from_le_bytes(v);
 
-                    match bad64::decode(vv, addr) {
-                        Ok(instr) => {
-                            let instr = format!("{}", instr);
-                            log::info!("0x{:016x}    {:48} # {:02x?}", addr, instr, v)
-                        }
-                        Err(e) => {
-                            let err_str = format!("Error: '{}'", e);
-                            let byte_str = format!("{:02x?}", v);
-                            log::info!("0x{:016x}    {:48} # {}", addr, byte_str, err_str)
-                        }
-                    };
-                }
-                Err(_) => {}
-            },
-        )
+                match bad64::decode(vv, addr) {
+                    Ok(instr) => {
+                        let instr = format!("{}", instr);
+                        log::info!("0x{:016x}    {:48} # {:02x?}", addr, instr, v)
+                    }
+                    Err(e) => {
+                        let err_str = format!("Error: '{}'", e);
+                        let byte_str = format!("{:02x?}", v);
+                        log::info!("0x{:016x}    {:48} # {}", addr, byte_str, err_str)
+                    }
+                };
+            }
+        })
         .for_each(drop);
 }
 

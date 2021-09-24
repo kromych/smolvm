@@ -7,7 +7,7 @@ pub use boot_params::*;
 pub use cpu::*;
 
 use super::Memory;
-use kvm_bindings::{kvm_cpuid2, kvm_dtable, kvm_msr_entry, kvm_segment, Msrs};
+use kvm_bindings::{kvm_dtable, kvm_msr_entry, kvm_segment, Msrs};
 use kvm_ioctls::{VcpuExit, VcpuFd};
 use raw_cpuid::CpuId;
 use std::sync::{Arc, Mutex};
