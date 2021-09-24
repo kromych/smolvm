@@ -36,3 +36,20 @@ export CC_aarch64_unknown_linux_musl=/opt/gcc-linaro-7.5.0-2019.12-x86_64_aarch6
 For a reason unknown to me, cross-compiling on Fedora 34 also required the
 glibc-devel-2.33-20.fc34.i686 (i.e. 32bit x86 glibc library) as the compiler
 needed the `stubs-32.h` hedader (???).
+
+To run the kernels with `qemu`:
+```bash
+# Linux kernel, x86_64
+qemu-system-aarch64 -kernel kernels/linux-5.14-stable/x86_64/vmlinux -machine virt -nographic -accel kvm -cpu host
+
+# MacOS, Apple Silicon
+qemu-system-aarch64 -kernel kernels/linux-5.14-stable/aarch64/Image -machine virt,highmem=off -nographic -accel hvf -cpu host
+
+# Linux kernel, aarch64
+qemu-system-aarch64 -kernel kernels/linux-5.14-stable/aarch64/Image -machine virt,highmem=off -nographic -accel kvm -cpu host
+
+```
+
+For tracing, add `--trace "*"` options to the command-line
+To dump the device tree block, append `,dumpdtb=out-file-name` to the machine model.
+To convert the binary dtb file to a text form: `dtc -I dtb -O dts -o text.dts bin.dtb`

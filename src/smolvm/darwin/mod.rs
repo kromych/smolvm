@@ -10,61 +10,44 @@ pub use self::aarch64::{Cpu, CpuExit};
 
 pub use ahv::HypervisorError as HvError;
 
-use ahv::{MemoryPermission, VirtualCpuExitReason, VirtualMachine};
-use object::Architecture;
+use super::{GpaSpan, MappedGpa, Memory};
+use ahv::{MemoryPermission, VirtualMachine};
 use std::sync::{Arc, Mutex};
 
-pub struct Memory {
-    base: *mut u8,
-    size: usize,
-}
-
-impl Memory {
-    pub fn new(base: *mut u8, size: usize) -> Self {
-        Self { base, size }
-    }
-
-    pub fn as_slice(&self) -> &[u8] {
-        unsafe { std::slice::from_raw_parts(self.base, self.size) }
-    }
-
-    pub fn as_slice_mut(&self) -> &mut [u8] {
-        unsafe { std::slice::from_raw_parts_mut(self.base, self.size) }
-    }
-}
-
 pub struct SmolVm {
-    native_arch: Architecture,
-    vm: VirtualMachine,
     cpu: Arc<Mutex<Cpu>>,
     memory: Arc<Mutex<Memory>>,
+    vm: VirtualMachine,
 }
 
 impl SmolVm {
-    pub fn new(memory_size: usize) -> Result<Self, HvError> {
-        #[cfg(target_arch = "x86_64")]
-        let native_arch = Architecture::X86_64;
-
-        #[cfg(target_arch = "aarch64")]
-        let native_arch = Architecture::Aarch64;
-
+    pub fn new(memory_map: &[GpaSpan]) -> Result<Self, HvError> {
         let mut vm = VirtualMachine::new(None)?;
+        let memory = {
+            let mut memory_spans = Vec::new();
 
-        let handle = vm.allocate(memory_size)?;
-        vm.map(handle, 0x10000, MemoryPermission::READ_WRITE_EXECUTE)?;
-        let alloc = vm.get_allocation_slice(handle)?;
-        let base = (alloc as *const _) as *mut u8;
-        let size = alloc.len();
+            for gpa_span in memory_map {
+                let handle = vm.allocate(gpa_span.size)?;
+                vm.map(handle, gpa_span.start, MemoryPermission::READ_WRITE_EXECUTE)?;
+                let alloc = vm.get_allocation_slice(handle)?;
+                let base = (alloc as *const _) as *mut u8;
+                let size = alloc.len();
 
-        let memory = Memory::new(base, size);
+                memory_spans.push(MappedGpa {
+                    memory: base,
+                    gpa: gpa_span.start,
+                    size,
+                });
+            }
+
+            Memory::new(memory_spans)
+        };
 
         let vcpu = vm.create_vcpu(None)?;
-
         let mut cpu = Cpu::new(vcpu)?;
         cpu.init()?;
 
         Ok(Self {
-            native_arch,
             vm,
             cpu: Arc::new(Mutex::new(cpu)),
             memory: Arc::new(Mutex::new(memory)),
@@ -73,10 +56,6 @@ impl SmolVm {
 }
 
 impl crate::smolvm::SmolVmT for SmolVm {
-    fn get_native_arch(&self) -> object::Architecture {
-        self.native_arch
-    }
-
     fn get_memory(&self) -> std::sync::Arc<std::sync::Mutex<Memory>> {
         self.memory.clone()
     }

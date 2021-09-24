@@ -1,12 +1,12 @@
 #[cfg(target_os = "macos")]
 mod darwin;
 #[cfg(target_os = "macos")]
-pub use darwin::{Cpu, CpuExit, HvError, Memory, SmolVm};
+pub use darwin::{Cpu, CpuExit, HvError, SmolVm};
 
 #[cfg(target_os = "linux")]
 mod linux;
 #[cfg(target_os = "linux")]
-pub use linux::{Cpu, CpuExit, HvError, Memory, SmolVm};
+pub use linux::{Cpu, CpuExit, HvError, SmolVm};
 
 use object::{
     elf::{FileHeader64, PF_R, PF_W, PF_X},
@@ -87,10 +87,91 @@ fn disassemble_aarch64(bytes: &[u8], ip: u64) {
         .for_each(drop);
 }
 
+pub struct MappedGpa {
+    memory: *mut u8,
+    gpa: u64,
+    size: usize,
+}
+
+pub struct Memory {
+    spans: Vec<MappedGpa>,
+}
+
+impl Memory {
+    pub fn new(spans: Vec<MappedGpa>) -> Self {
+        Self { spans }
+    }
+
+    pub fn write(&mut self, gpa: u64, data: &[u8]) {
+        if let Some(span) = self.find_span(gpa) {
+            let span = unsafe {
+                std::slice::from_raw_parts_mut(
+                    (span.memory as u64 + (gpa - span.gpa)) as *mut u8,
+                    span.size - (gpa as usize - span.gpa as usize),
+                )
+            };
+
+            span[..data.len()].copy_from_slice(data);
+        } else {
+            panic!("Cannot write as GPA is invalid {:#x}", gpa);
+        }
+    }
+
+    pub fn read(&self, gpa: u64, size: usize) -> &[u8] {
+        if let Some(span) = self.find_span(gpa) {
+            let span = unsafe {
+                std::slice::from_raw_parts(
+                    (span.memory as u64 + (gpa - span.gpa)) as *mut u8,
+                    span.size - (gpa as usize - span.gpa as usize),
+                )
+            };
+
+            if span.len() < size {
+                panic!(
+                    "Cannot read {} bytes at GPA {:#x}, only {} bytes available",
+                    size,
+                    gpa,
+                    span.len()
+                );
+            }
+
+            span
+        } else {
+            panic!("Cannot read as GPA is invalid {:#x}", gpa);
+        }
+    }
+
+    pub fn is_gpa_valid(&self, gpa: u64) -> bool {
+        self.find_span(gpa).is_some()
+    }
+
+    pub fn find_span(&self, gpa: u64) -> Option<&MappedGpa> {
+        for span in &self.spans {
+            if span.gpa <= gpa && gpa < span.gpa + span.size as u64 {
+                return Some(span);
+            }
+        }
+
+        None
+    }
+}
+
 pub trait SmolVmT {
-    fn get_native_arch(&self) -> Architecture;
     fn get_memory(&self) -> Arc<Mutex<Memory>>;
     fn get_cpu(&self) -> Arc<Mutex<Cpu>>;
+
+    fn get_native_arch(&self) -> Architecture {
+        #[cfg(target_arch = "x86_64")]
+        {
+            Architecture::X86_64
+        }
+
+        #[cfg(target_arch = "aarch64")]
+        {
+            Architecture::Aarch64
+        }
+    }
+
     fn load_elf(&mut self, elf_data: &[u8]) {
         #[derive(Default, Clone, Copy)]
         struct SegmentToLoad {
@@ -271,6 +352,7 @@ pub trait SmolVmT {
         loop {
             cpu.run().map(|_| ())?;
         }
+        Ok(())
     }
 }
 

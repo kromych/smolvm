@@ -22,12 +22,6 @@ use kvm_ioctls::VmFd;
 pub use std::io::Error as HvError;
 pub use VcpuExit as CpuExit;
 
-struct MappedGpa {
-    memory: *mut u8,
-    gpa: u64,
-    size: usize,
-}
-
 pub struct Memory {
     spans: Vec<MappedGpa>,
 }
@@ -140,19 +134,14 @@ impl Memory {
 }
 
 pub struct SmolVm {
-    native_arch: Architecture,
     cpu: Arc<Mutex<Cpu>>,
     memory: Arc<Mutex<Memory>>,
+    vm_fd: VmFd,
+    kvm_fd: KvmFd,
 }
 
 impl SmolVm {
     pub fn new(gpa_map: &[GpaSpan]) -> Result<Self, std::io::Error> {
-        #[cfg(target_arch = "x86_64")]
-        let native_arch = Architecture::X86_64;
-
-        #[cfg(target_arch = "aarch64")]
-        let native_arch = Architecture::Aarch64;
-
         let kvm_fd = Kvm::new()?;
         let vm_fd = kvm_fd.create_vm()?;
         let memory = Arc::new(Mutex::new(Memory::new(&vm_fd, gpa_map)?));
@@ -161,18 +150,15 @@ impl SmolVm {
         let cpu = Arc::new(Mutex::new(cpu));
 
         Ok(Self {
-            native_arch,
             cpu,
             memory,
+            vm_fd,
+            kvm_fd,
         })
     }
 }
 
 impl crate::SmolVmT for SmolVm {
-    fn get_native_arch(&self) -> object::Architecture {
-        self.native_arch
-    }
-
     fn get_memory(&self) -> std::sync::Arc<std::sync::Mutex<Memory>> {
         self.memory.clone()
     }

@@ -1,9 +1,7 @@
 #![cfg(target_arch = "aarch64")]
 
-use ahv::HypervisorError;
-use ahv::Register;
-use ahv::VirtualCpu;
 pub use ahv::VirtualCpuExitReason as CpuExit;
+use ahv::{HypervisorError, Register, VirtualCpu, VirtualCpuExitReason};
 
 pub struct Cpu {
     vcpu: VirtualCpu,
@@ -27,7 +25,9 @@ impl Cpu {
         match exit {
             VirtualCpuExitReason::Exception { exception } => {
                 let ec = (exception.syndrome >> 26) & 0x3f;
-                log::info!("Exception syndrome 0x{:x}", ec);
+                let ip = self.vcpu.get_register(Register::PC)?;
+                log::info!("Exception syndrome 0x{:x} at 0x{:x}", ec, ip);
+                self.vcpu.set_register(Register::PC, ip + 4)?;
             }
             e => panic!("Unsupported Vcpu Exit {:?}", e),
         }
