@@ -2,10 +2,7 @@ use kvm_bindings::{kvm_userspace_memory_region, KVM_SYSTEM_EVENT_SHUTDOWN};
 use kvm_ioctls::Kvm;
 pub use kvm_ioctls::VcpuExit;
 
-use object::Architecture;
-
-use std::sync::Arc;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 #[cfg(target_arch = "x86_64")]
 mod x86_64;
