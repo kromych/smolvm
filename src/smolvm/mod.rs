@@ -94,6 +94,8 @@ pub struct MappedGpa {
 }
 
 pub struct Memory {
+    // TODO make lookups more efficient,
+    // check for duplicatyes/overlapping entries
     spans: Vec<MappedGpa>,
 }
 
