@@ -108,16 +108,14 @@ impl Uart {
             ..Default::default()
         };
 
-        uart.can_send();
-        uart.can_receive();
+        uart.registers[LSR_OFFSET as usize] = 0x21; // THRE | RBF
+        uart.registers[LCR_OFFSET as usize] = 0x3; // 8 bits, 1 stop bit, no parity
+        uart.registers[MCR_OFFSET as usize] = 0x3; // DTR | RTS
 
         uart
     }
 
     pub fn write_byte(&mut self, address: u16, data: u8) {
-        self.can_send();
-        self.can_receive();
-
         if self.divisor_latch_active() {
             if address == self.base_addr {
                 self.divisor_latch[0] = data;
@@ -154,9 +152,6 @@ impl Uart {
     }
 
     pub fn write_word(&mut self, address: u16, data: u16) {
-        self.can_send();
-        self.can_receive();
-
         if self.divisor_latch_active() {
             if address == self.base_addr {
                 self.divisor_latch[0] = (data & 0xff) as u8;
@@ -179,9 +174,6 @@ impl Uart {
     }
 
     pub fn read_byte(&mut self, address: u16) -> Option<u8> {
-        self.can_send();
-        self.can_receive();
-
         if self.divisor_latch_active() {
             if address == self.base_addr {
                 return Some(self.divisor_latch[0]);
@@ -204,9 +196,6 @@ impl Uart {
     }
 
     pub fn read_word(&mut self, address: u16) -> Option<u16> {
-        self.can_send();
-        self.can_receive();
-
         if self.divisor_latch_active() {
             if address == self.base_addr {
                 return Some(self.divisor_latch[0] as u16 | ((self.divisor_latch[1] as u16) << 8));
@@ -236,13 +225,5 @@ impl Uart {
         } else {
             None
         }
-    }
-
-    fn can_send(&mut self) {
-        self.registers[LSR_OFFSET as usize] |= 0x20; // Can send
-    }
-
-    fn can_receive(&mut self) {
-        self.registers[LSR_OFFSET as usize] |= 0x1; // Can receive
     }
 }
