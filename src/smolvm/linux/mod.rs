@@ -1,4 +1,4 @@
-use kvm_bindings::{kvm_userspace_memory_region, KVM_SYSTEM_EVENT_SHUTDOWN};
+use kvm_bindings::kvm_userspace_memory_region;
 use kvm_ioctls::Kvm;
 pub use kvm_ioctls::VcpuExit;
 
@@ -22,8 +22,8 @@ pub use VcpuExit as CpuExit;
 pub struct SmolVm {
     cpu: Arc<Mutex<Cpu>>,
     memory: Arc<Mutex<Memory>>,
-    vm_fd: VmFd,
-    kvm_fd: Kvm,
+    _vm_fd: VmFd,
+    _kvm_fd: Kvm,
 }
 
 impl SmolVm {
@@ -80,8 +80,8 @@ impl SmolVm {
         Ok(Self {
             cpu,
             memory,
-            vm_fd,
-            kvm_fd,
+            _vm_fd: vm_fd,
+            _kvm_fd: kvm_fd,
         })
     }
 }

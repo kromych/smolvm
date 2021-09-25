@@ -243,7 +243,24 @@ impl Cpu {
         Ok(())
     }
 
-    pub fn run(&mut self) -> Result<CpuExitReason, std::io::Error> {
+    pub fn run(
+        &mut self,
+        prev_exit_reason: &CpuExitReason,
+    ) -> Result<CpuExitReason, std::io::Error> {
+        match prev_exit_reason {
+            CpuExitReason::IoByteIn(_, byte) => {
+                let mut regs = self.vcpu_fd.get_regs()?;
+                regs.rax = ((regs.rax >> 8) << 8) | *byte as u64;
+                self.vcpu_fd.set_regs(&regs)?;
+            }
+            CpuExitReason::IoWordIn(_, word) => {
+                let mut regs = self.vcpu_fd.get_regs()?;
+                regs.rax = ((regs.rax >> 16) << 16) | *word as u64;
+                self.vcpu_fd.set_regs(&regs)?;
+            }
+            _ => {}
+        };
+
         let exit = self.vcpu_fd.run()?;
 
         let exit_reason = match &exit {
@@ -266,20 +283,13 @@ impl Cpu {
                     CpuExitReason::NotSupported
                 }
             }
-            e => CpuExitReason::NotSupported,
+            _ => CpuExitReason::NotSupported,
         };
 
-        let regs = self.vcpu_fd.get_regs().unwrap_or_default();
-        let sregs = self.vcpu_fd.get_sregs().unwrap_or_default();
         if exit_reason == CpuExitReason::NotSupported {
+            let regs = self.vcpu_fd.get_regs().unwrap_or_default();
+            let sregs = self.vcpu_fd.get_sregs().unwrap_or_default();
             log::error!(
-                "Exit {:#x?}, registers {:x?}, system registers {:x?}",
-                exit,
-                regs,
-                sregs
-            );
-        } else {
-            log::trace!(
                 "Exit {:#x?}, registers {:x?}, system registers {:x?}",
                 exit,
                 regs,
@@ -298,7 +308,7 @@ impl Cpu {
         Ok(())
     }
 
-    pub fn get_instruction_pointer(&mut self) -> Result<u64, std::io::Error> {
+    pub fn _get_instruction_pointer(&mut self) -> Result<u64, std::io::Error> {
         let regs = self.vcpu_fd.get_regs()?;
 
         Ok(regs.rip)

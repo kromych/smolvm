@@ -63,6 +63,8 @@
 //!  DCTS:        Delta Clear To Send
 //!
 
+use zerocopy::AsBytes;
+
 pub enum UartBase {
     Com1,
     Com2,
@@ -90,6 +92,7 @@ pub struct Uart {
     base_addr: u16,
     divisor_latch: [u8; 2],
     registers: [u8; 8],
+    buffer: Vec<u8>,
 }
 
 impl Uart {
@@ -101,87 +104,126 @@ impl Uart {
                 UartBase::Com3 => 0x3E8,
                 UartBase::Com4 => 0x2E8,
             },
+            buffer: Vec::with_capacity(512),
             ..Default::default()
         };
 
-        uart.registers[LSR_OFFSET as usize] |= 0x20; // Can send
-        uart.registers[LSR_OFFSET as usize] |= 0x1; // Can receive
+        uart.can_send();
+        uart.can_receive();
 
         uart
     }
 
     pub fn write_byte(&mut self, address: u16, data: u8) {
+        self.can_send();
+        self.can_receive();
+
         if self.divisor_latch_active() {
             if address == self.base_addr {
                 self.divisor_latch[0] = data;
+                return;
             } else if address == self.base_addr + 1 {
                 self.divisor_latch[1] = data;
-            } else {
-                todo!()
+                return;
             }
-            return;
         }
 
         if let Some(offset) = self.register_offset(address) {
             self.registers[offset] = data;
             if offset == 0 {
-                println!("{}", data as char)
+                self.buffer.push(data);
+
+                if data == b'\n' {
+                    use std::io::Write;
+
+                    print!("{}", unsafe {
+                        std::str::from_utf8_unchecked(self.buffer.as_bytes())
+                    });
+                    std::io::stdout().flush().ok();
+                    self.buffer.clear();
+                }
             }
         } else {
-            todo!()
+            log::warn!(
+                "Writing {} at to {:#x}, base {:#x}, not implemented",
+                data,
+                address,
+                self.base_addr
+            )
         }
     }
 
     pub fn write_word(&mut self, address: u16, data: u16) {
+        self.can_send();
+        self.can_receive();
+
         if self.divisor_latch_active() {
             if address == self.base_addr {
-                self.divisor_latch[0] = data as u8 & 0xff;
-                self.divisor_latch[1] = data as u8 >> 8;
-            } else {
-                todo!()
+                self.divisor_latch[0] = (data & 0xff) as u8;
+                self.divisor_latch[1] = (data >> 8) as u8;
+
+                return;
             }
-            return;
         }
 
         if let Some(offset) = self.register_offset(address) {
             self.registers[offset] = data as u8 & 0xff;
         } else {
-            todo!()
+            log::warn!(
+                "Writing {} at to {:#x}, base {:#x}, not implemented",
+                data,
+                address,
+                self.base_addr
+            )
         }
     }
 
-    pub fn read_byte(&self, address: u16) -> Option<u8> {
+    pub fn read_byte(&mut self, address: u16) -> Option<u8> {
+        self.can_send();
+        self.can_receive();
+
         if self.divisor_latch_active() {
             if address == self.base_addr {
                 return Some(self.divisor_latch[0]);
             } else if address == self.base_addr + 1 {
                 return Some(self.divisor_latch[1]);
-            } else {
-                return None;
             }
         }
 
         if let Some(offset) = self.register_offset(address) {
-            return Some(self.registers[offset]);
-        }
+            Some(self.registers[offset])
+        } else {
+            log::warn!(
+                "Reading from {:#x}, base {:#x}, not implemented",
+                address,
+                self.base_addr
+            );
 
-        None
+            None
+        }
     }
 
-    pub fn read_word(&self, address: u16) -> Option<u16> {
+    pub fn read_word(&mut self, address: u16) -> Option<u16> {
+        self.can_send();
+        self.can_receive();
+
         if self.divisor_latch_active() {
             if address == self.base_addr {
                 return Some(self.divisor_latch[0] as u16 | ((self.divisor_latch[1] as u16) << 8));
-            } else {
-                return None;
             }
         }
 
         if let Some(offset) = self.register_offset(address) {
-            Some(self.registers[offset] as u16);
-        }
+            Some(self.registers[offset] as u16)
+        } else {
+            log::warn!(
+                "Reading from {:#x}, base {:#x}, not implemented",
+                address,
+                self.base_addr
+            );
 
-        None
+            None
+        }
     }
 
     fn divisor_latch_active(&self) -> bool {
@@ -190,9 +232,17 @@ impl Uart {
 
     fn register_offset(&self, address: u16) -> Option<usize> {
         if address >= self.base_addr && address < self.base_addr + self.registers.len() as u16 {
-            Some((address - self.base_addr) as usize);
+            Some((address - self.base_addr) as usize)
+        } else {
+            None
         }
+    }
 
-        None
+    fn can_send(&mut self) {
+        self.registers[LSR_OFFSET as usize] |= 0x20; // Can send
+    }
+
+    fn can_receive(&mut self) {
+        self.registers[LSR_OFFSET as usize] |= 0x1; // Can receive
     }
 }

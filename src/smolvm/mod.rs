@@ -8,6 +8,7 @@ mod linux;
 #[cfg(target_os = "linux")]
 pub use linux::{Cpu, CpuExit, HvError, SmolVm};
 
+use self::uart::Uart;
 use object::{
     elf::{FileHeader64, PF_R, PF_W, PF_X},
     read::elf::{FileHeader, ProgramHeader},
@@ -118,7 +119,7 @@ impl Memory {
         }
     }
 
-    pub fn read(&self, gpa: u64, size: usize) -> &[u8] {
+    pub fn _read(&self, gpa: u64, size: usize) -> &[u8] {
         if let Some(span) = self.find_span(gpa) {
             let span = unsafe {
                 std::slice::from_raw_parts(
@@ -142,7 +143,7 @@ impl Memory {
         }
     }
 
-    pub fn is_gpa_valid(&self, gpa: u64) -> bool {
+    pub fn _is_gpa_valid(&self, gpa: u64) -> bool {
         self.find_span(gpa).is_some()
     }
 
@@ -360,18 +361,37 @@ pub trait SmolVmT {
         let cpu = self.get_cpu();
         let mut cpu = cpu.lock().unwrap();
 
-        Ok(cpu.run()?)
+        Ok(cpu.run(&CpuExitReason::NotSupported)?)
     }
 
     fn run(&mut self) -> Result<CpuExitReason, HvError> {
         let cpu = self.get_cpu();
         let mut cpu = cpu.lock().unwrap();
+        let mut uart = Uart::new(uart::UartBase::Com1);
+        let mut exit_reason = CpuExitReason::NotSupported;
 
         loop {
-            let exit_reason = cpu.run()?;
+            exit_reason = cpu.run(&exit_reason)?;
 
-            if exit_reason == CpuExitReason::NotSupported {
-                return Ok(exit_reason);
+            match exit_reason {
+                CpuExitReason::NotSupported => return Ok(exit_reason),
+                CpuExitReason::Halt => {}
+                CpuExitReason::IoByteIn(port, _) => {
+                    if let Some(byte) = uart.read_byte(port) {
+                        exit_reason = CpuExitReason::IoByteIn(port, byte);
+                    }
+                }
+                CpuExitReason::IoByteOut(port, data) => {
+                    uart.write_byte(port, data);
+                }
+                CpuExitReason::IoWordIn(port, _) => {
+                    if let Some(word) = uart.read_word(port) {
+                        exit_reason = CpuExitReason::IoWordIn(port, word);
+                    }
+                }
+                CpuExitReason::IoWordOut(port, data) => {
+                    uart.write_word(port, data);
+                }
             }
         }
     }
