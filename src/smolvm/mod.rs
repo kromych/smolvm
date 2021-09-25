@@ -94,14 +94,33 @@ pub struct MappedGpa {
 }
 
 pub struct Memory {
-    // TODO make lookups more efficient,
-    // check for duplicatyes/overlapping entries
     spans: Vec<MappedGpa>,
 }
 
 impl Memory {
     pub fn new(spans: Vec<MappedGpa>) -> Self {
-        Self { spans }
+        let mut memory = Self { spans: Vec::new() };
+        for span in spans {
+            if memory.find_span(span.gpa).is_some() {
+                panic!("Duplicated/overlapping entry at 0x{:x}", span.gpa);
+            }
+            if span.gpa & 0xfff_u64 != 0 {
+                panic!(
+                    "Entry at 0x{:x} is not aligned at the 4K page boundary",
+                    span.gpa
+                );
+            }
+            if span.size & 0xfff_usize != 0 {
+                panic!(
+                    "Size of the span at 0x{:x} is must conatin whole 4K pages",
+                    span.gpa
+                );
+            }
+
+            memory.spans.push(span);
+        }
+
+        memory
     }
 
     pub fn write(&mut self, gpa: u64, data: &[u8]) {
