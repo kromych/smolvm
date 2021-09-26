@@ -203,7 +203,7 @@ pub trait SmolVmT {
         }
     }
 
-    fn load_elf(&mut self, elf_data: &[u8]) {
+    fn load_kernel_elf(&mut self, elf_data: &[u8]) {
         #[derive(Default, Clone, Copy)]
         struct SegmentToLoad {
             offset: u64,

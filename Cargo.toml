@@ -31,3 +31,6 @@ ahv = "0.1"
 
 [dev-dependencies]
 byteorder = ">=1.2.1"
+
+[profile.release]
+debug = true

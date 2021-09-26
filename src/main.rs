@@ -36,7 +36,7 @@ fn run_kernel(kernel_path: &str) -> Result<(), HvError> {
         start: gpa_start,
         size: 64 * 1024 * 1024,
     }])?;
-    vm.load_elf(&*file);
+    vm.load_kernel_elf(&*file);
     vm.run()?;
 
     Ok(())

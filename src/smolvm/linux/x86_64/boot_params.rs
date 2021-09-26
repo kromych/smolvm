@@ -1,5 +1,6 @@
 //! This file contains declarations pertinent to the x86 Linux
 //! boot protocol
+//! See linux/Documentation/x86/boot.rst for the gory details.
 
 #![allow(dead_code)]
 
@@ -12,6 +13,47 @@ pub const BOOT_CODE_CS: u16 = BOOT_CODE_CS_GDT_INDEX << 3;
 pub const BOOT_CODE_DS: u16 = BOOT_CODE_SS_GDT_INDEX << 3;
 pub const BOOT_CODE_LDT: u16 = BOOT_CODE_LDT_GDT_INDEX << 3;
 pub const BOOT_CODE_TSS: u16 = BOOT_CODE_TSS_GDT_INDEX << 3;
+
+#[repr(u32)]
+#[allow(dead_code)]
+pub enum E820MemoryType {
+    E820TypeRam = 1,
+    E820TypeReserved = 2,
+    E820TypeAcpi = 3,
+    E820TypeNvs = 4,
+    E820TypeUnusable = 5,
+    E820TypePmem = 7,
+
+    /*
+     * This is a non-standardized way to represent ADR or
+     * NVDIMM regions that persist over a reboot.
+     *
+     * The kernel will ignore their special capabilities
+     * unless the CONFIG_X86_PMEM_LEGACY=y option is set.
+     *
+     * ( Note that older platforms also used 6 for the same
+     *   type of memory, but newer versions switched to 12 as
+     *   6 was assigned differently. Some time they will learn... )
+     */
+    E820TypePram = 12,
+
+    /*
+     * Special-purpose memory is indicated to the system via the
+     * EFI_MEMORY_SP attribute. Define an e820 translation of this
+     * memory type for the purpose of reserving this range and
+     * marking it with the IORES_DESC_SOFT_RESERVED designation.
+     */
+    E820TypeSoftReserved = 0xefffffff,
+
+    /*
+     * Reserved RAM used by the kernel itself if
+     * CONFIG_INTEL_TXT=y is enabled, memory of this type
+     * will be included in the S3 integrity calculation
+     * and so should not include any memory that the BIOS
+     * might alter over the S3 transition:
+     */
+    E820TypeReservedKern = 128,
+}
 
 #[repr(C, packed)]
 pub struct ScreenInfo {
@@ -160,8 +202,8 @@ static_assertions::const_assert_eq!(std::mem::size_of::<SetupHeader>(), 123);
 #[repr(C, packed)]
 pub struct BootE820Entry {
     pub addr: u64,
-    pub size: u64,
-    pub type_: u32,
+    pub size: usize,
+    pub type_: E820MemoryType,
 }
 
 static_assertions::const_assert_eq!(std::mem::size_of::<BootE820Entry>(), 20);
@@ -208,6 +250,6 @@ static_assertions::const_assert_eq!(std::mem::size_of::<BootParams>(), 4096);
 
 impl Default for BootParams {
     fn default() -> BootParams {
-        unsafe { std::mem::zeroed() }
+        unsafe { std::mem::transmute([0_u8; 4096]) }
     }
 }

@@ -14,9 +14,11 @@ mod aarch64;
 #[cfg(target_arch = "aarch64")]
 pub use self::aarch64::Cpu;
 
+use self::x86_64::{BootE820Entry, BootParams, E820MemoryType, GpRegister};
 use super::{GpaSpan, MappedGpa, Memory};
 use kvm_ioctls::VmFd;
 pub use std::io::Error as HvError;
+use zerocopy::AsBytes;
 pub use VcpuExit as CpuExit;
 
 pub struct SmolVm {
@@ -72,9 +74,47 @@ impl SmolVm {
             spans.push(mapped_gpa);
         }
 
-        let memory = Arc::new(Mutex::new(Memory::new(spans)));
+        let params_slice = unsafe {
+            std::slice::from_raw_parts(
+                {
+                    let mut params = BootParams::default();
+                    params.e820_entries = spans.len() as u8;
+
+                    for i in 0..params.e820_entries {
+                        params.e820_table[i as usize] = BootE820Entry {
+                            addr: spans[i as usize].gpa,
+                            size: spans[i as usize].size,
+                            type_: E820MemoryType::E820TypeRam,
+                        }
+                    }
+
+                    params.setup_header.boot_flag = 0xaa55;
+                    params.setup_header.header = 0x53726448;
+                    params.setup_header.version = 0x20c;
+                    params.setup_header.type_of_loader = 0xff;
+                    params.setup_header.initrd_addr_max = 0x7fffffff;
+                    params.setup_header.kernel_alignment = 0x200000;
+                    params.setup_header.relocatable_kernel = 0x0;
+                    // params.setup_header.cmd_line_ptr = 0x90000;
+                    // params.setup_header.cmdline_size = 0x7ff;
+                    params.setup_header.pref_address = 0x2000000;
+                    params.setup_header.min_alignment = 0x15;
+
+                    (&params as *const _) as *const u8
+                },
+                std::mem::size_of::<BootParams>(),
+            )
+        };
+
+        let zero_page_gpa = 0x10000;
+        let mut memory = Memory::new(spans);
+        memory.write(zero_page_gpa, params_slice);
+
+        let memory = Arc::new(Mutex::new(memory));
+
         let mut cpu = Cpu::new(&kvm_fd, &vm_fd, memory.clone())?;
         cpu.init()?;
+        cpu.set_gp_register(GpRegister::Rsi, zero_page_gpa)?;
         let cpu = Arc::new(Mutex::new(cpu));
 
         Ok(Self {

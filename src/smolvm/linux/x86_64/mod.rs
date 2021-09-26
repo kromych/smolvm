@@ -14,6 +14,26 @@ use raw_cpuid::CpuId;
 use std::sync::{Arc, Mutex};
 use zerocopy::AsBytes;
 
+#[allow(dead_code)]
+pub enum GpRegister {
+    Rax,
+    Rcx,
+    Rdx,
+    Rbx,
+    Rsp,
+    Rbp,
+    Rsi,
+    Rdi,
+    R8,
+    R9,
+    R10,
+    R11,
+    R12,
+    R13,
+    R14,
+    R15,
+}
+
 // The second entry matters for TSS and LDT only
 fn get_x86_64_dtable_64bit_entry(kvm_entry: &kvm_segment) -> u64 {
     if kvm_entry.s == 0 {
@@ -214,11 +234,18 @@ impl Cpu {
 
         vcpu_fd.set_sregs(&sregs)?;
 
-        let msrs = Msrs::from_entries(&[kvm_msr_entry {
-            index: MSR_CR_PAT,
-            data: MSR_CR_PAT_DEFAULT,
-            ..Default::default()
-        }])
+        let msrs = Msrs::from_entries(&[
+            kvm_msr_entry {
+                index: MSR_IA32_CR_PAT,
+                data: MSR_IA32_CR_PAT_DEFAULT,
+                ..Default::default()
+            },
+            kvm_msr_entry {
+                index: MSR_IA32_MISC_ENABLE,
+                data: MSR_IA32_MISC_ENABLE_FAST_STR,
+                ..Default::default()
+            },
+        ])
         .unwrap();
         vcpu_fd.set_msrs(&msrs)?;
 
@@ -239,6 +266,31 @@ impl Cpu {
         //     control: kvm_bindings::KVM_GUESTDBG_ENABLE | kvm_bindings::KVM_GUESTDBG_SINGLESTEP,
         //     ..Default::default()
         // })?;
+
+        Ok(())
+    }
+
+    pub fn set_gp_register(&mut self, gpr: GpRegister, v: u64) -> Result<(), std::io::Error> {
+        let mut regs = self.vcpu_fd.get_regs()?;
+        match gpr {
+            GpRegister::Rax => regs.rax = v,
+            GpRegister::Rcx => regs.rcx = v,
+            GpRegister::Rdx => regs.rdx = v,
+            GpRegister::Rbx => regs.rbx = v,
+            GpRegister::Rsp => regs.rsp = v,
+            GpRegister::Rbp => regs.rbp = v,
+            GpRegister::Rsi => regs.rsi = v,
+            GpRegister::Rdi => regs.rdi = v,
+            GpRegister::R8 => regs.r8 = v,
+            GpRegister::R9 => regs.r9 = v,
+            GpRegister::R10 => regs.r10 = v,
+            GpRegister::R11 => regs.r11 = v,
+            GpRegister::R12 => regs.r12 = v,
+            GpRegister::R13 => regs.r13 = v,
+            GpRegister::R14 => regs.r14 = v,
+            GpRegister::R15 => regs.r15 = v,
+        }
+        self.vcpu_fd.set_regs(&regs)?;
 
         Ok(())
     }

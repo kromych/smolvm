@@ -39,8 +39,11 @@ pub const EFER_LME: u64 = 0x100;
 pub const EFER_LMA: u64 = 0x400;
 pub const EFER_NXE: u64 = 0x800;
 
-pub const MSR_CR_PAT: u32 = 0x00000277;
-pub const MSR_CR_PAT_DEFAULT: u64 = 0x0007040600070406;
+pub const MSR_IA32_CR_PAT: u32 = 0x00000277;
+pub const MSR_IA32_CR_PAT_DEFAULT: u64 = 0x0007040600070406;
+
+pub const MSR_IA32_MISC_ENABLE: u32 = 0x000001a0;
+pub const MSR_IA32_MISC_ENABLE_FAST_STR: u64 = 0x00000001;
 
 /// System-Segment and Gate-Descriptor Types 64-bit mode
 /// See also Intel 3a, Table 3-2 System Segment and Gate-Descriptor Types.
