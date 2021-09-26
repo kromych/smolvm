@@ -13,6 +13,7 @@ pub use cpu::*;
 use kvm_bindings::{
     kvm_cpuid2, kvm_cpuid_entry2, kvm_dtable, kvm_msr_entry, kvm_msrs, kvm_regs, kvm_run,
     kvm_segment, kvm_sregs, KVM_EXIT_HLT, KVM_EXIT_IO, KVM_EXIT_IO_IN, KVM_EXIT_IO_OUT,
+    KVM_EXIT_MMIO,
 };
 use raw_cpuid::CpuId;
 use zerocopy::AsBytes;
@@ -496,19 +497,15 @@ impl Cpu {
                 }
             },
             KVM_EXIT_HLT => CpuExitReason::Halt,
-            // KVM_EXIT_MMIO => {
-            //     // Safe because the exit_reason (which comes from the kernel) told us which
-            //     // union field to use.
-            //     let mmio = unsafe { &mut run.__bindgen_anon_1.mmio };
-            //     let addr = mmio.phys_addr;
-            //     let len = mmio.len as usize;
-            //     let data_slice = &mut mmio.data[..len];
-            //     if mmio.is_write != 0 {
-            //         Ok(VcpuExit::MmioWrite(addr, data_slice))
-            //     } else {
-            //         Ok(VcpuExit::MmioRead(addr, data_slice))
-            //     }
-            // }
+            KVM_EXIT_MMIO => unsafe {
+                let mmio = &mut run.__bindgen_anon_1.mmio;
+                let _addr = mmio.phys_addr;
+                let len = mmio.len as usize;
+                let _data_slice = &mut mmio.data[..len];
+                let _is_write = mmio.is_write != 0;
+
+                CpuExitReason::NotSupported
+            },
             _ => CpuExitReason::NotSupported,
         };
 
