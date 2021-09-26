@@ -5,14 +5,14 @@ pub use self::x86_64::{Cpu, CpuExit};
 
 #[cfg(target_arch = "aarch64")]
 mod aarch64;
-#[cfg(target_arch = "aarch64")]
-pub use self::aarch64::{Cpu, CpuExit};
+use std::sync::{Arc, Mutex};
 
 pub use ahv::HypervisorError as HvError;
-
-use super::{GpaSpan, MappedGpa, Memory};
 use ahv::{MemoryPermission, VirtualMachine};
-use std::sync::{Arc, Mutex};
+
+#[cfg(target_arch = "aarch64")]
+pub use self::aarch64::{Cpu, CpuExit};
+use super::{GpaSpan, MappedGpa, Memory};
 
 pub struct SmolVm {
     cpu: Arc<Mutex<Cpu>>,

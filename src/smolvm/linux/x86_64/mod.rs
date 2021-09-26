@@ -3,16 +3,22 @@
 mod boot_params;
 mod cpu;
 
+use std::{
+    os::unix::prelude::RawFd,
+    sync::{Arc, Mutex},
+};
+
 pub use boot_params::*;
 pub use cpu::*;
+use kvm_bindings::{
+    kvm_cpuid2, kvm_cpuid_entry2, kvm_dtable, kvm_msr_entry, kvm_msrs, kvm_regs, kvm_run,
+    kvm_segment, kvm_sregs, KVM_EXIT_HLT, KVM_EXIT_IO, KVM_EXIT_IO_IN, KVM_EXIT_IO_OUT,
+};
+use raw_cpuid::CpuId;
+use zerocopy::AsBytes;
 
 use super::Memory;
-use crate::smolvm::CpuExitReason;
-use kvm_bindings::{kvm_dtable, kvm_msr_entry, kvm_segment, Msrs};
-use kvm_ioctls::{VcpuExit, VcpuFd};
-use raw_cpuid::CpuId;
-use std::sync::{Arc, Mutex};
-use zerocopy::AsBytes;
+use crate::smolvm::{CpuExitReason, IoType};
 
 #[allow(dead_code)]
 pub enum GpRegister {
@@ -95,34 +101,121 @@ fn get_x86_64_dtable_128bit_entry(kvm_entry: &kvm_segment) -> [u64; 2] {
 }
 
 pub struct Cpu {
-    vcpu_fd: VcpuFd,
+    kvm_fd: RawFd,
+    vcpu_fd: RawFd,
+    vcpu_run: *mut kvm_run,
+    _vcpu_mmap_size: i32,
     memory: Arc<Mutex<Memory>>,
 }
 
 impl Cpu {
     pub fn new(
-        kvm_fd: &kvm_ioctls::Kvm,
-        vm_fd: &kvm_ioctls::VmFd,
+        kvm_fd: RawFd,
+        vm_fd: RawFd,
         memory: Arc<Mutex<Memory>>,
     ) -> Result<Self, std::io::Error> {
+        let vcpu_fd = unsafe {
+            super::kvm_create_vcpu(vm_fd, 0 /* id */)?
+        };
+
+        let vcpu_mmap_size = unsafe { super::kvm_get_vcpu_mmap_size(kvm_fd, 0)? };
+        let vcpu_run = unsafe {
+            let ptr = libc::mmap(
+                std::ptr::null_mut(),
+                vcpu_mmap_size as usize,
+                libc::PROT_READ | libc::PROT_WRITE,
+                libc::MAP_SHARED,
+                vcpu_fd,
+                0,
+            );
+            if ptr == libc::MAP_FAILED {
+                return Err(super::last_os_error());
+            }
+            ptr as *mut kvm_run
+        };
+
+        Ok(Self {
+            kvm_fd,
+            vcpu_fd,
+            vcpu_run,
+            _vcpu_mmap_size: vcpu_mmap_size,
+            memory,
+        })
+    }
+
+    fn setup_cpuid(&self) -> Result<(), std::io::Error> {
+        let vcpu_fd = self.vcpu_fd;
+
         let host_cpu_id = CpuId::new();
         log::trace!("Host CPU: {:#x?}", host_cpu_id);
 
-        let vcpu_fd = vm_fd.create_vcpu(0)?;
-
         // Inspect the default CPUID data
-        //let guest_cpu_id = vcpu_fd.get_cpuid2(kvm_bindings::KVM_MAX_CPUID_ENTRIES)?.as_slice();
+        //let guest_cpu_id = kvm_get_cpuid2(kvm_bindings::KVM_MAX_CPUID_ENTRIES)?.as_slice();
+
+        // TODO For MP, need to set APIC ID properly
 
         // Set all supported CPUID features, no filtering.
         // Without that, the kernel would fail to set MSRs, etc as support for that
         // is communicated through CPUID
-        let cpu_id = kvm_fd.get_supported_cpuid(kvm_bindings::KVM_MAX_CPUID_ENTRIES)?;
-        vcpu_fd.set_cpuid2(&cpu_id)?;
+        unsafe {
+            const KVM_CPUID_NENT: u32 = 256;
 
-        Ok(Self { vcpu_fd, memory })
+            #[repr(C)]
+            struct KvmCpuid2Array {
+                header: kvm_cpuid2,
+                entries: [kvm_cpuid_entry2; KVM_CPUID_NENT as usize],
+            }
+
+            let mut cpu_id_entries = KvmCpuid2Array {
+                header: kvm_cpuid2 {
+                    nent: KVM_CPUID_NENT,
+                    ..Default::default()
+                },
+                entries: [kvm_cpuid_entry2::default(); KVM_CPUID_NENT as usize],
+            };
+
+            super::kvm_get_supported_cpuid(self.kvm_fd, &mut cpu_id_entries.header as *mut _)?;
+            super::kvm_set_cpuid2(vcpu_fd, &cpu_id_entries.header as *const _)?;
+        }
+
+        Ok(())
     }
 
-    pub fn init(&mut self) -> Result<(), std::io::Error> {
+    fn get_regs(&self) -> Result<kvm_regs, std::io::Error> {
+        let mut regs = kvm_regs::default();
+        unsafe {
+            super::kvm_get_regs(self.vcpu_fd, &mut regs as *mut _)?;
+        }
+
+        Ok(regs)
+    }
+
+    fn set_regs(&self, regs: &kvm_regs) -> Result<(), std::io::Error> {
+        unsafe {
+            super::kvm_set_regs(self.vcpu_fd, regs as *const _)?;
+        }
+
+        Ok(())
+    }
+
+    fn get_sregs(&self) -> Result<kvm_sregs, std::io::Error> {
+        let mut sregs = kvm_sregs::default();
+        unsafe {
+            super::kvm_get_sregs(self.vcpu_fd, &mut sregs as *mut _)?;
+        }
+
+        Ok(sregs)
+    }
+
+    fn set_sregs(&self, sregs: &kvm_sregs) -> Result<(), std::io::Error> {
+        unsafe {
+            super::kvm_set_sregs(self.vcpu_fd, sregs as *const _)?;
+        }
+
+        Ok(())
+    }
+
+    fn setup_long_mode(&mut self) -> Result<(), std::io::Error> {
         const STACK_TOP_OFFSET: u64 = 0x3fff0;
         const GDT_OFFSET: u64 = 0x4000;
         const TSS_OFFSET: u64 = 0x5000;
@@ -130,10 +223,9 @@ impl Cpu {
         const PDPT_OFFSET: u64 = 0x7000;
         const PDT_OFFSET: u64 = 0x8000;
 
-        let vcpu_fd = &self.vcpu_fd;
         let mut memory = self.memory.lock().unwrap();
 
-        let mut sregs = vcpu_fd.get_sregs()?;
+        let mut sregs = self.get_sregs()?;
 
         // Set up table registers
         {
@@ -232,46 +324,94 @@ impl Cpu {
             sregs.efer = EFER_LMA | EFER_LME | EFER_NXE | EFER_SCE;
         }
 
-        vcpu_fd.set_sregs(&sregs)?;
+        self.set_sregs(&sregs)?;
 
-        let msrs = Msrs::from_entries(&[
-            kvm_msr_entry {
-                index: MSR_IA32_CR_PAT,
-                data: MSR_IA32_CR_PAT_DEFAULT,
-                ..Default::default()
-            },
-            kvm_msr_entry {
-                index: MSR_IA32_MISC_ENABLE,
-                data: MSR_IA32_MISC_ENABLE_FAST_STR,
-                ..Default::default()
-            },
-        ])
-        .unwrap();
-        vcpu_fd.set_msrs(&msrs)?;
-
-        let mut regs = vcpu_fd.get_regs()?;
+        let mut regs = self.get_regs()?;
         regs.rsp = STACK_TOP_OFFSET;
         regs.rbp = STACK_TOP_OFFSET;
         regs.rflags = 2;
-        vcpu_fd.set_regs(&regs)?;
+        self.set_regs(&regs)?;
 
-        vcpu_fd.set_fpu(&kvm_bindings::kvm_fpu {
-            fcw: 0x37f,
-            mxcsr: 0x1f80,
-            ..Default::default()
-        })?;
+        Ok(())
+    }
 
+    fn setup_msrs(&self) -> Result<(), std::io::Error> {
+        const KVM_MSR_NENT: u32 = 2;
+
+        #[repr(C)]
+        struct KvmMsrs {
+            header: kvm_msrs,
+            entries: [kvm_msr_entry; KVM_MSR_NENT as usize],
+        }
+
+        let msrs = KvmMsrs {
+            header: kvm_msrs {
+                nmsrs: KVM_MSR_NENT,
+                ..Default::default()
+            },
+            entries: [
+                kvm_msr_entry {
+                    index: MSR_IA32_CR_PAT,
+                    data: MSR_IA32_CR_PAT_DEFAULT,
+                    ..Default::default()
+                },
+                kvm_msr_entry {
+                    index: MSR_IA32_MISC_ENABLE,
+                    data: MSR_IA32_MISC_ENABLE_FAST_STR,
+                    ..Default::default()
+                },
+            ],
+        };
+
+        unsafe {
+            super::kvm_set_msrs(self.vcpu_fd, &msrs.header as *const _)?;
+        }
+
+        Ok(())
+    }
+
+    fn setup_fpu(&self) -> Result<(), std::io::Error> {
+        unsafe {
+            super::kvm_set_fpu(
+                self.vcpu_fd,
+                &kvm_bindings::kvm_fpu {
+                    fcw: 0x37f,
+                    mxcsr: 0x1f80,
+                    ..Default::default()
+                } as *const _,
+            )?;
+        }
+        Ok(())
+    }
+
+    fn _setup_debug(&self) -> Result<(), std::io::Error> {
         // Single-step the guest
-        // vcpu_fd.set_guest_debug(&kvm_bindings::kvm_guest_debug {
-        //     control: kvm_bindings::KVM_GUESTDBG_ENABLE | kvm_bindings::KVM_GUESTDBG_SINGLESTEP,
-        //     ..Default::default()
-        // })?;
+        unsafe {
+            super::kvm_set_guest_debug(
+                self.vcpu_fd,
+                &kvm_bindings::kvm_guest_debug {
+                    control: kvm_bindings::KVM_GUESTDBG_ENABLE
+                        | kvm_bindings::KVM_GUESTDBG_SINGLESTEP,
+                    ..Default::default()
+                } as *const _,
+            )?;
+        }
+
+        Ok(())
+    }
+
+    pub fn init(&mut self) -> Result<(), std::io::Error> {
+        self.setup_cpuid()?;
+        self.setup_msrs()?;
+        self.setup_fpu()?;
+        //self._setup_debug()?;
+        self.setup_long_mode()?;
 
         Ok(())
     }
 
     pub fn set_gp_register(&mut self, gpr: GpRegister, v: u64) -> Result<(), std::io::Error> {
-        let mut regs = self.vcpu_fd.get_regs()?;
+        let mut regs = self.get_regs()?;
         match gpr {
             GpRegister::Rax => regs.rax = v,
             GpRegister::Rcx => regs.rcx = v,
@@ -290,7 +430,7 @@ impl Cpu {
             GpRegister::R14 => regs.r14 = v,
             GpRegister::R15 => regs.r15 = v,
         }
-        self.vcpu_fd.set_regs(&regs)?;
+        self.set_regs(&regs)?;
 
         Ok(())
     }
@@ -299,51 +439,85 @@ impl Cpu {
         &mut self,
         prev_exit_reason: &CpuExitReason,
     ) -> Result<CpuExitReason, std::io::Error> {
+        let run = &mut unsafe { std::slice::from_raw_parts_mut(self.vcpu_run, 1) }[0];
+
         match prev_exit_reason {
-            CpuExitReason::IoByteIn(_, byte) => {
-                let mut regs = self.vcpu_fd.get_regs()?;
-                regs.rax = ((regs.rax >> 8) << 8) | *byte as u64;
-                self.vcpu_fd.set_regs(&regs)?;
-            }
-            CpuExitReason::IoWordIn(_, word) => {
-                let mut regs = self.vcpu_fd.get_regs()?;
-                regs.rax = ((regs.rax >> 16) << 16) | *word as u64;
-                self.vcpu_fd.set_regs(&regs)?;
-            }
+            CpuExitReason::Io(io_type) => unsafe {
+                let run_start = run as *mut kvm_run as *mut u8;
+                let io = &run.__bindgen_anon_1.io;
+                let _port = io.port;
+                let data_size = io.count as usize * io.size as usize;
+                let bytes_ptr = run_start.offset(io.data_offset as isize);
+                let io_bytes =
+                    std::slice::from_raw_parts_mut::<u8>(bytes_ptr as *mut u8, data_size);
+
+                match *io_type {
+                    IoType::ByteIn(_, byte) => io_bytes[0] = byte,
+                    IoType::WordIn(_, word) => {
+                        io_bytes[0] = word as u8;
+                        io_bytes[1] = (word >> 8) as u8
+                    }
+                    _ => {}
+                }
+            },
             _ => {}
         };
 
-        let exit = self.vcpu_fd.run()?;
+        unsafe { super::kvm_run(self.vcpu_fd, 0)? };
 
-        let exit_reason = match &exit {
-            VcpuExit::Hlt => CpuExitReason::Halt,
-            VcpuExit::IoIn(port, data) => {
-                if data.len() == 1 {
-                    CpuExitReason::IoByteIn(*port, data[0])
-                } else if data.len() == 2 {
-                    CpuExitReason::IoWordIn(*port, data[0] as u16 | (data[1] as u16) << 8)
-                } else {
-                    CpuExitReason::NotSupported
+        let exit_reason = match run.exit_reason {
+            KVM_EXIT_IO => unsafe {
+                let run_start = run as *mut kvm_run as *mut u8;
+                let io = &run.__bindgen_anon_1.io;
+                let port = io.port;
+                let data_size = io.count as usize * io.size as usize;
+                let bytes_ptr = run_start.offset(io.data_offset as isize);
+                let io_bytes =
+                    std::slice::from_raw_parts_mut::<u8>(bytes_ptr as *mut u8, data_size);
+
+                match u32::from(io.direction) {
+                    KVM_EXIT_IO_IN => match data_size {
+                        1 => CpuExitReason::Io(IoType::ByteIn(port, io_bytes[0])),
+                        2 => CpuExitReason::Io(IoType::WordIn(
+                            port,
+                            io_bytes[0] as u16 | (io_bytes[1] as u16) << 8,
+                        )),
+                        _ => CpuExitReason::NotSupported,
+                    },
+                    KVM_EXIT_IO_OUT => match data_size {
+                        1 => CpuExitReason::Io(IoType::ByteOut(port, io_bytes[0])),
+                        2 => CpuExitReason::Io(IoType::WordOut(
+                            port,
+                            io_bytes[0] as u16 | (io_bytes[1] as u16) << 8,
+                        )),
+                        _ => CpuExitReason::NotSupported,
+                    },
+                    _ => CpuExitReason::NotSupported,
                 }
-            }
-            VcpuExit::IoOut(port, data) => {
-                if data.len() == 1 {
-                    CpuExitReason::IoByteOut(*port, data[0])
-                } else if data.len() == 2 {
-                    CpuExitReason::IoWordOut(*port, data[0] as u16 | (data[1] as u16) << 8)
-                } else {
-                    CpuExitReason::NotSupported
-                }
-            }
+            },
+            KVM_EXIT_HLT => CpuExitReason::Halt,
+            // KVM_EXIT_MMIO => {
+            //     // Safe because the exit_reason (which comes from the kernel) told us which
+            //     // union field to use.
+            //     let mmio = unsafe { &mut run.__bindgen_anon_1.mmio };
+            //     let addr = mmio.phys_addr;
+            //     let len = mmio.len as usize;
+            //     let data_slice = &mut mmio.data[..len];
+            //     if mmio.is_write != 0 {
+            //         Ok(VcpuExit::MmioWrite(addr, data_slice))
+            //     } else {
+            //         Ok(VcpuExit::MmioRead(addr, data_slice))
+            //     }
+            // }
             _ => CpuExitReason::NotSupported,
         };
 
         if exit_reason == CpuExitReason::NotSupported {
-            let regs = self.vcpu_fd.get_regs().unwrap_or_default();
-            let sregs = self.vcpu_fd.get_sregs().unwrap_or_default();
+            let regs = self.get_regs().unwrap_or_default();
+            let sregs = self.get_sregs().unwrap_or_default();
             log::error!(
-                "Exit {:#x?}, registers {:x?}, system registers {:x?}",
-                exit,
+                "Exit {:#x}, registers {:x?}, system registers {:x?}",
+                run.exit_reason,
                 regs,
                 sregs
             );
@@ -353,15 +527,15 @@ impl Cpu {
     }
 
     pub fn set_instruction_pointer(&mut self, ip: u64) -> Result<(), std::io::Error> {
-        let mut regs = self.vcpu_fd.get_regs()?;
+        let mut regs = self.get_regs()?;
         regs.rip = ip;
-        self.vcpu_fd.set_regs(&regs)?;
+        self.set_regs(&regs)?;
 
         Ok(())
     }
 
     pub fn _get_instruction_pointer(&mut self) -> Result<u64, std::io::Error> {
-        let regs = self.vcpu_fd.get_regs()?;
+        let regs = self.get_regs()?;
 
         Ok(regs.rip)
     }

@@ -1,8 +1,12 @@
-use kvm_bindings::kvm_userspace_memory_region;
-use kvm_ioctls::Kvm;
-pub use kvm_ioctls::VcpuExit;
+use std::{
+    os::unix::prelude::RawFd,
+    sync::{Arc, Mutex},
+};
 
-use std::sync::{Arc, Mutex};
+use kvm_bindings::{
+    kvm_cpuid2, kvm_fpu, kvm_guest_debug, kvm_msrs, kvm_regs, kvm_sregs,
+    kvm_userspace_memory_region,
+};
 
 #[cfg(target_arch = "x86_64")]
 mod x86_64;
@@ -11,21 +15,62 @@ pub use self::x86_64::Cpu;
 
 #[cfg(target_arch = "aarch64")]
 mod aarch64;
+pub use std::io::Error as HvError;
+
+use nix::{ioctl_read, ioctl_readwrite, ioctl_write_int_bad, ioctl_write_ptr, request_code_none};
+
 #[cfg(target_arch = "aarch64")]
 pub use self::aarch64::Cpu;
-
 use self::x86_64::{BootE820Entry, BootParams, E820MemoryType, GpRegister};
 use super::{GpaSpan, MappedGpa, Memory};
-use kvm_ioctls::VmFd;
-pub use std::io::Error as HvError;
-use zerocopy::AsBytes;
-pub use VcpuExit as CpuExit;
+
+pub fn last_os_error() -> std::io::Error {
+    std::io::Error::from_raw_os_error(nix::errno::errno())
+}
+
+const KVMIO: u8 = 0xae;
+
+ioctl_write_int_bad!(kvm_create_vm, request_code_none!(KVMIO, 0x1));
+ioctl_write_int_bad!(kvm_get_vcpu_mmap_size, request_code_none!(KVMIO, 0x04));
+ioctl_readwrite!(kvm_get_supported_cpuid, KVMIO, 0x05, kvm_cpuid2);
+ioctl_write_int_bad!(kvm_create_vcpu, request_code_none!(KVMIO, 0x41));
+ioctl_write_ptr!(
+    kvm_userspace_memory_region,
+    KVMIO,
+    0x46,
+    kvm_userspace_memory_region
+);
+ioctl_write_int_bad!(kvm_run, request_code_none!(KVMIO, 0x80));
+ioctl_read!(kvm_get_regs, KVMIO, 0x81, kvm_regs);
+ioctl_write_ptr!(kvm_set_regs, KVMIO, 0x82, kvm_regs);
+ioctl_read!(kvm_get_sregs, KVMIO, 0x83, kvm_sregs);
+ioctl_write_ptr!(kvm_set_sregs, KVMIO, 0x84, kvm_sregs);
+ioctl_write_ptr!(kvm_set_msrs, KVMIO, 0x89, kvm_msrs);
+ioctl_read!(kvm_get_fpu, KVMIO, 0x8c, kvm_fpu);
+ioctl_write_ptr!(kvm_set_fpu, KVMIO, 0x8d, kvm_fpu);
+ioctl_write_ptr!(kvm_set_cpuid2, KVMIO, 0x90, kvm_cpuid2);
+ioctl_write_ptr!(kvm_set_guest_debug, KVMIO, 0x9b, kvm_guest_debug);
+
+fn open_kvm() -> std::io::Result<RawFd> {
+    // Safe because we give a constant null-terminated string and verify the result.
+    let ret = unsafe {
+        libc::open(
+            "/dev/kvm\0".as_ptr() as *const libc::c_char,
+            libc::O_RDWR | libc::O_CLOEXEC,
+        )
+    };
+    if ret < 0 {
+        Err(last_os_error())
+    } else {
+        Ok(ret)
+    }
+}
 
 pub struct SmolVm {
     cpu: Arc<Mutex<Cpu>>,
     memory: Arc<Mutex<Memory>>,
-    _vm_fd: VmFd,
-    _kvm_fd: Kvm,
+    _vm_fd: RawFd,
+    _kvm_fd: RawFd,
 }
 
 impl SmolVm {
@@ -50,8 +95,10 @@ impl SmolVm {
             addr as *mut u8
         };
 
-        let kvm_fd = Kvm::new()?;
-        let vm_fd = kvm_fd.create_vm()?;
+        let kvm_fd = open_kvm()?;
+        let vm_fd = unsafe {
+            kvm_create_vm(kvm_fd, 0 /*vm type */)
+        }?;
 
         let mut spans = Vec::new();
         for (index, span) in gpa_map.iter().enumerate() {
@@ -62,13 +109,16 @@ impl SmolVm {
             };
 
             unsafe {
-                vm_fd.set_user_memory_region(kvm_userspace_memory_region {
-                    slot: index as u32,
-                    guest_phys_addr: span.start,
-                    memory_size: mapped_gpa.size as u64,
-                    userspace_addr: mapped_gpa.memory as u64,
-                    flags: 0,
-                })?;
+                kvm_userspace_memory_region(
+                    vm_fd,
+                    &kvm_userspace_memory_region {
+                        slot: index as u32,
+                        guest_phys_addr: span.start,
+                        memory_size: mapped_gpa.size as u64,
+                        userspace_addr: mapped_gpa.memory as u64,
+                        flags: 0,
+                    } as *const _,
+                )?;
             }
 
             spans.push(mapped_gpa);
@@ -112,7 +162,7 @@ impl SmolVm {
 
         let memory = Arc::new(Mutex::new(memory));
 
-        let mut cpu = Cpu::new(&kvm_fd, &vm_fd, memory.clone())?;
+        let mut cpu = Cpu::new(kvm_fd, vm_fd, memory.clone())?;
         cpu.init()?;
         cpu.set_gp_register(GpRegister::Rsi, zero_page_gpa)?;
         let cpu = Arc::new(Mutex::new(cpu));

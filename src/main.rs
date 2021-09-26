@@ -1,6 +1,8 @@
-use crate::smolvm::GpaSpan;
-use smolvm::{HvError, SmolVmT};
 use std::fs;
+
+use smolvm::{HvError, SmolVmT};
+
+use crate::smolvm::GpaSpan;
 
 #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
 compile_error!("Unsupported target architecture");

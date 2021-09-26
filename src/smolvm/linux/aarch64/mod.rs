@@ -1,11 +1,11 @@
 #![cfg(target_arch = "aarch64")]
 
-use super::Memory;
+use std::sync::{Arc, Mutex};
+
 use kvm_bindings::KVM_ARM_VCPU_PSCI_0_2;
-use kvm_ioctls::VcpuExit;
-use kvm_ioctls::VcpuFd;
-use std::sync::Arc;
-use std::sync::Mutex;
+use kvm_ioctls::{VcpuExit, VcpuFd};
+
+use super::Memory;
 
 pub struct Cpu {
     vcpu_fd: VcpuFd,

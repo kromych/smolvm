@@ -5,17 +5,17 @@ pub use darwin::{Cpu, CpuExit, HvError, SmolVm};
 
 #[cfg(target_os = "linux")]
 mod linux;
-#[cfg(target_os = "linux")]
-pub use linux::{Cpu, CpuExit, HvError, SmolVm};
+use std::sync::{Arc, Mutex};
 
-use self::uart::Uart;
+#[cfg(target_os = "linux")]
+pub use linux::{Cpu, HvError, SmolVm};
 use object::{
     elf::{FileHeader64, PF_R, PF_W, PF_X},
     read::elf::{FileHeader, ProgramHeader},
     Architecture, Endianness, FileKind, Object, ObjectSection, SectionKind,
 };
-use std::sync::Arc;
-use std::sync::Mutex;
+
+use self::uart::Uart;
 
 mod uart;
 
@@ -178,13 +178,18 @@ impl Memory {
 }
 
 #[derive(PartialEq)]
+pub enum IoType {
+    ByteIn(u16 /* port */, u8 /* data */),
+    ByteOut(u16 /* port */, u8 /* data */),
+    WordIn(u16 /* port */, u16 /* data */),
+    WordOut(u16 /* port */, u16 /* data */),
+}
+
+#[derive(PartialEq)]
 pub enum CpuExitReason {
     NotSupported,
     Halt,
-    IoByteIn(u16 /* port */, u8 /* data */),
-    IoByteOut(u16 /* port */, u8 /* data */),
-    IoWordIn(u16 /* port */, u16 /* data */),
-    IoWordOut(u16 /* port */, u16 /* data */),
+    Io(IoType),
 }
 
 pub trait SmolVmT {
@@ -392,25 +397,27 @@ pub trait SmolVmT {
         loop {
             exit_reason = cpu.run(&exit_reason)?;
 
-            match exit_reason {
+            match &exit_reason {
                 CpuExitReason::NotSupported => return Ok(exit_reason),
                 CpuExitReason::Halt => {}
-                CpuExitReason::IoByteIn(port, _) => {
-                    if let Some(byte) = uart.read_byte(port) {
-                        exit_reason = CpuExitReason::IoByteIn(port, byte);
+                CpuExitReason::Io(io_type) => match io_type {
+                    IoType::ByteOut(port, data) => {
+                        uart.write_byte(*port, *data);
                     }
-                }
-                CpuExitReason::IoByteOut(port, data) => {
-                    uart.write_byte(port, data);
-                }
-                CpuExitReason::IoWordIn(port, _) => {
-                    if let Some(word) = uart.read_word(port) {
-                        exit_reason = CpuExitReason::IoWordIn(port, word);
+                    IoType::WordOut(port, data) => {
+                        uart.write_word(*port, *data);
                     }
-                }
-                CpuExitReason::IoWordOut(port, data) => {
-                    uart.write_word(port, data);
-                }
+                    IoType::ByteIn(port, _) => {
+                        if let Some(byte) = uart.read_byte(*port) {
+                            exit_reason = CpuExitReason::Io(IoType::ByteIn(*port, byte));
+                        }
+                    }
+                    IoType::WordIn(port, _) => {
+                        if let Some(word) = uart.read_word(*port) {
+                            exit_reason = CpuExitReason::Io(IoType::WordIn(*port, word));
+                        }
+                    }
+                },
             }
         }
     }
@@ -418,8 +425,7 @@ pub trait SmolVmT {
 
 #[cfg(test)]
 mod tests {
-    use super::GpaSpan;
-    use super::SmolVmT;
+    use super::{GpaSpan, SmolVmT};
 
     #[test]
     #[cfg(target_arch = "x86_64")]

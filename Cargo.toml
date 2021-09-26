@@ -24,7 +24,7 @@ raw-cpuid = "10.2"
 [target.'cfg(target_os = "linux")'.dependencies]
 libc = ">=0.2.39"
 kvm-bindings = "0.5"
-kvm-ioctls = "0.10"
+nix = "0.22"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 ahv = "0.1"
