@@ -12,14 +12,23 @@ pub use boot_params::*;
 pub use cpu::*;
 use kvm_bindings::{
     kvm_cpuid2, kvm_cpuid_entry2, kvm_dtable, kvm_msr_entry, kvm_msrs, kvm_regs, kvm_run,
-    kvm_segment, kvm_sregs, KVM_EXIT_HLT, KVM_EXIT_IO, KVM_EXIT_IO_IN, KVM_EXIT_IO_OUT,
+    kvm_segment, kvm_sregs, KVMIO, KVM_EXIT_HLT, KVM_EXIT_IO, KVM_EXIT_IO_IN, KVM_EXIT_IO_OUT,
     KVM_EXIT_MMIO,
 };
+use nix::{ioctl_read, ioctl_readwrite, ioctl_write_ptr};
 use raw_cpuid::CpuId;
 use zerocopy::AsBytes;
 
 use super::Memory;
 use crate::smolvm::{CpuExitReason, IoType};
+
+ioctl_read!(kvm_get_regs, KVMIO, 0x81, kvm_regs);
+ioctl_write_ptr!(kvm_set_regs, KVMIO, 0x82, kvm_regs);
+ioctl_read!(kvm_get_sregs, KVMIO, 0x83, kvm_sregs);
+ioctl_write_ptr!(kvm_set_sregs, KVMIO, 0x84, kvm_sregs);
+ioctl_write_ptr!(kvm_set_msrs, KVMIO, 0x89, kvm_msrs);
+ioctl_readwrite!(kvm_get_supported_cpuid, KVMIO, 0x05, kvm_cpuid2);
+ioctl_write_ptr!(kvm_set_cpuid2, KVMIO, 0x90, kvm_cpuid2);
 
 #[allow(dead_code)]
 pub enum GpRegister {
@@ -175,8 +184,8 @@ impl Cpu {
                 entries: [kvm_cpuid_entry2::default(); KVM_CPUID_NENT as usize],
             };
 
-            super::kvm_get_supported_cpuid(self.kvm_fd, &mut cpu_id_entries.header as *mut _)?;
-            super::kvm_set_cpuid2(vcpu_fd, &cpu_id_entries.header as *const _)?;
+            kvm_get_supported_cpuid(self.kvm_fd, &mut cpu_id_entries.header as *mut _)?;
+            kvm_set_cpuid2(vcpu_fd, &cpu_id_entries.header as *const _)?;
         }
 
         Ok(())
@@ -185,7 +194,7 @@ impl Cpu {
     fn get_regs(&self) -> Result<kvm_regs, std::io::Error> {
         let mut regs = kvm_regs::default();
         unsafe {
-            super::kvm_get_regs(self.vcpu_fd, &mut regs as *mut _)?;
+            kvm_get_regs(self.vcpu_fd, &mut regs as *mut _)?;
         }
 
         Ok(regs)
@@ -193,7 +202,7 @@ impl Cpu {
 
     fn set_regs(&self, regs: &kvm_regs) -> Result<(), std::io::Error> {
         unsafe {
-            super::kvm_set_regs(self.vcpu_fd, regs as *const _)?;
+            kvm_set_regs(self.vcpu_fd, regs as *const _)?;
         }
 
         Ok(())
@@ -202,7 +211,7 @@ impl Cpu {
     fn get_sregs(&self) -> Result<kvm_sregs, std::io::Error> {
         let mut sregs = kvm_sregs::default();
         unsafe {
-            super::kvm_get_sregs(self.vcpu_fd, &mut sregs as *mut _)?;
+            kvm_get_sregs(self.vcpu_fd, &mut sregs as *mut _)?;
         }
 
         Ok(sregs)
@@ -210,7 +219,7 @@ impl Cpu {
 
     fn set_sregs(&self, sregs: &kvm_sregs) -> Result<(), std::io::Error> {
         unsafe {
-            super::kvm_set_sregs(self.vcpu_fd, sregs as *const _)?;
+            kvm_set_sregs(self.vcpu_fd, sregs as *const _)?;
         }
 
         Ok(())
@@ -365,7 +374,7 @@ impl Cpu {
         };
 
         unsafe {
-            super::kvm_set_msrs(self.vcpu_fd, &msrs.header as *const _)?;
+            kvm_set_msrs(self.vcpu_fd, &msrs.header as *const _)?;
         }
 
         Ok(())

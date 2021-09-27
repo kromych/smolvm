@@ -3,10 +3,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use kvm_bindings::{
-    kvm_cpuid2, kvm_fpu, kvm_guest_debug, kvm_msrs, kvm_regs, kvm_sregs,
-    kvm_userspace_memory_region,
-};
+use kvm_bindings::{kvm_fpu, kvm_guest_debug, kvm_userspace_memory_region};
 
 #[cfg(target_arch = "x86_64")]
 mod x86_64;
@@ -17,11 +14,10 @@ pub use self::x86_64::Cpu;
 mod aarch64;
 pub use std::io::Error as HvError;
 
-use nix::{ioctl_read, ioctl_readwrite, ioctl_write_int_bad, ioctl_write_ptr, request_code_none};
+use nix::{ioctl_read, ioctl_write_int_bad, ioctl_write_ptr, request_code_none};
 
 #[cfg(target_arch = "aarch64")]
 pub use self::aarch64::Cpu;
-use self::x86_64::{BootE820Entry, BootParams, E820MemoryType, GpRegister};
 use super::{GpaSpan, MappedGpa, Memory};
 
 pub fn last_os_error() -> std::io::Error {
@@ -32,7 +28,6 @@ const KVMIO: u8 = 0xae;
 
 ioctl_write_int_bad!(kvm_create_vm, request_code_none!(KVMIO, 0x1));
 ioctl_write_int_bad!(kvm_get_vcpu_mmap_size, request_code_none!(KVMIO, 0x04));
-ioctl_readwrite!(kvm_get_supported_cpuid, KVMIO, 0x05, kvm_cpuid2);
 ioctl_write_int_bad!(kvm_create_vcpu, request_code_none!(KVMIO, 0x41));
 ioctl_write_ptr!(
     kvm_userspace_memory_region,
@@ -41,14 +36,8 @@ ioctl_write_ptr!(
     kvm_userspace_memory_region
 );
 ioctl_write_int_bad!(kvm_run, request_code_none!(KVMIO, 0x80));
-ioctl_read!(kvm_get_regs, KVMIO, 0x81, kvm_regs);
-ioctl_write_ptr!(kvm_set_regs, KVMIO, 0x82, kvm_regs);
-ioctl_read!(kvm_get_sregs, KVMIO, 0x83, kvm_sregs);
-ioctl_write_ptr!(kvm_set_sregs, KVMIO, 0x84, kvm_sregs);
-ioctl_write_ptr!(kvm_set_msrs, KVMIO, 0x89, kvm_msrs);
 ioctl_read!(kvm_get_fpu, KVMIO, 0x8c, kvm_fpu);
 ioctl_write_ptr!(kvm_set_fpu, KVMIO, 0x8d, kvm_fpu);
-ioctl_write_ptr!(kvm_set_cpuid2, KVMIO, 0x90, kvm_cpuid2);
 ioctl_write_ptr!(kvm_set_guest_debug, KVMIO, 0x9b, kvm_guest_debug);
 
 fn open_kvm() -> std::io::Result<RawFd> {
@@ -124,49 +113,67 @@ impl SmolVm {
             spans.push(mapped_gpa);
         }
 
-        let params_slice = unsafe {
-            std::slice::from_raw_parts(
-                {
-                    let mut params = BootParams {
-                        e820_entries: spans.len() as u8,
-                        ..Default::default()
-                    };
+        let params_page;
 
-                    for i in 0..params.e820_entries {
-                        params.e820_table[i as usize] = BootE820Entry {
-                            addr: spans[i as usize].gpa,
-                            size: spans[i as usize].size,
-                            type_: E820MemoryType::E820TypeRam,
+        #[cfg(target_arch = "x86_64")]
+        let params_slice = {
+            use self::x86_64::{BootE820Entry, BootParams, E820MemoryType};
+
+            let params_slice = unsafe {
+                std::slice::from_raw_parts(
+                    {
+                        let mut params = BootParams {
+                            e820_entries: spans.len() as u8,
+                            ..Default::default()
+                        };
+
+                        for i in 0..params.e820_entries {
+                            params.e820_table[i as usize] = BootE820Entry {
+                                addr: spans[i as usize].gpa,
+                                size: spans[i as usize].size,
+                                type_: E820MemoryType::E820TypeRam,
+                            }
                         }
-                    }
 
-                    params.setup_header.boot_flag = 0xaa55;
-                    params.setup_header.header = 0x53726448;
-                    params.setup_header.version = 0x20c;
-                    params.setup_header.type_of_loader = 0xff;
-                    params.setup_header.initrd_addr_max = 0x7fffffff;
-                    params.setup_header.kernel_alignment = 0x200000;
-                    params.setup_header.relocatable_kernel = 0x0;
-                    // params.setup_header.cmd_line_ptr = 0x90000;
-                    // params.setup_header.cmdline_size = 0x7ff;
-                    params.setup_header.pref_address = 0x2000000;
-                    params.setup_header.min_alignment = 0x15;
+                        params.setup_header.boot_flag = 0xaa55;
+                        params.setup_header.header = 0x53726448;
+                        params.setup_header.version = 0x20c;
+                        params.setup_header.type_of_loader = 0xff;
+                        params.setup_header.initrd_addr_max = 0x7fffffff;
+                        params.setup_header.kernel_alignment = 0x200000;
+                        params.setup_header.relocatable_kernel = 0x0;
+                        // params.setup_header.cmd_line_ptr = 0x90000;
+                        // params.setup_header.cmdline_size = 0x7ff;
+                        params.setup_header.pref_address = 0x2000000;
+                        params.setup_header.min_alignment = 0x15;
 
-                    (&params as *const _) as *const u8
-                },
-                std::mem::size_of::<BootParams>(),
-            )
+                        (&params as *const _) as *const u8
+                    },
+                    std::mem::size_of::<BootParams>(),
+                )
+            };
+
+            params_slice
         };
 
-        let zero_page_gpa = 0x10000;
         let mut memory = Memory::new(spans);
-        memory.write(zero_page_gpa, params_slice);
+
+        #[cfg(target_arch = "x86_64")]
+        {
+            params_page = 0x10000;
+            memory.write(params_page, params_slice);
+        }
 
         let memory = Arc::new(Mutex::new(memory));
 
         let mut cpu = Cpu::new(kvm_fd, vm_fd, memory.clone())?;
         cpu.init()?;
-        cpu.set_gp_register(GpRegister::Rsi, zero_page_gpa)?;
+
+        #[cfg(target_arch = "x86_64")]
+        {
+            cpu.set_gp_register(self::x86_64::GpRegister::Rsi, params_page)?;
+        }
+
         let cpu = Arc::new(Mutex::new(cpu));
 
         Ok(Self {
