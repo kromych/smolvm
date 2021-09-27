@@ -14,8 +14,8 @@ use nix::{ioctl_read, ioctl_write_ptr};
 use super::Memory;
 use crate::smolvm::CpuExitReason;
 
-ioctl_read!(kvm_get_one_reg, KVMIO, 0xab, kvm_one_reg);
-ioctl_read!(kvm_set_one_reg, KVMIO, 0xac, kvm_one_reg);
+ioctl_write_ptr!(kvm_get_one_reg, KVMIO, 0xab, kvm_one_reg);
+ioctl_write_ptr!(kvm_set_one_reg, KVMIO, 0xac, kvm_one_reg);
 ioctl_write_ptr!(kvm_arm_vcpu_init, KVMIO, 0xae, kvm_vcpu_init);
 ioctl_read!(kvm_arm_preferred_target, KVMIO, 0xaf, kvm_vcpu_init);
 ioctl_write_ptr!(kvm_get_reg_list, KVMIO, 0xb0, kvm_reg_list);
