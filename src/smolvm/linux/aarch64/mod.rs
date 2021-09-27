@@ -52,8 +52,8 @@ impl Cpu {
         };
 
         let mut kvi = kvm_bindings::kvm_vcpu_init::default();
-        unsafe { kvm_arm_preferred_target(kvm_fd, &mut kvi)? };
-        kvi.features[0] |= 1 << KVM_ARM_VCPU_PSCI_0_2;
+        unsafe { kvm_arm_preferred_target(vm_fd, &mut kvi)? };
+        //kvi.features[0] |= 1 << KVM_ARM_VCPU_PSCI_0_2;
         unsafe { kvm_arm_vcpu_init(vcpu_fd, &mut kvi)? };
 
         Ok(Self {
