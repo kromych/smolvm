@@ -113,7 +113,7 @@ impl SmolVm {
             spans.push(mapped_gpa);
         }
 
-        let params_page;
+        let params_page: u64;
 
         #[cfg(target_arch = "x86_64")]
         let params_slice = {
