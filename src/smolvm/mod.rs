@@ -178,18 +178,18 @@ impl Memory {
 }
 
 #[derive(PartialEq)]
-pub enum IoType {
-    ByteIn(u16 /* port */, u8 /* data */),
+pub enum IoType<'a> {
+    ByteIn(u16 /* port */, &'a mut u8 /* data */),
     ByteOut(u16 /* port */, u8 /* data */),
-    WordIn(u16 /* port */, u16 /* data */),
+    WordIn(u16 /* port */, &'a mut u16 /* data */),
     WordOut(u16 /* port */, u16 /* data */),
 }
 
 #[derive(PartialEq)]
-pub enum CpuExitReason {
+pub enum CpuExitReason<'a> {
     NotSupported,
     Halt,
-    Io(IoType),
+    Io(IoType<'a>),
 }
 
 pub trait SmolVmT {
@@ -381,40 +381,40 @@ pub trait SmolVmT {
         cpu.set_instruction_pointer(load_addr).unwrap();
     }
 
-    fn run_once(&mut self) -> Result<CpuExitReason, HvError> {
+    fn run_once(&mut self) -> Result<(), HvError> {
         let cpu = self.get_cpu();
         let mut cpu = cpu.lock().unwrap();
 
-        Ok(cpu.run(&CpuExitReason::NotSupported)?)
+        cpu.run()?;
+        Ok(())
     }
 
     fn run(&mut self) -> Result<CpuExitReason, HvError> {
         let cpu = self.get_cpu();
         let mut cpu = cpu.lock().unwrap();
         let mut uart = Uart::new(uart::UartBase::Com1);
-        let mut exit_reason = CpuExitReason::NotSupported;
 
         loop {
-            exit_reason = cpu.run(&exit_reason)?;
+            let exit_reason = cpu.run()?;
 
-            match &exit_reason {
-                CpuExitReason::NotSupported => return Ok(exit_reason),
+            match exit_reason {
+                CpuExitReason::NotSupported => panic!("Not supported"),
                 CpuExitReason::Halt => {}
                 CpuExitReason::Io(io_type) => match io_type {
-                    IoType::ByteOut(port, data) => {
-                        uart.write_byte(*port, *data);
+                    IoType::ByteOut(port, byte_out) => {
+                        uart.write_byte(port, byte_out);
                     }
-                    IoType::WordOut(port, data) => {
-                        uart.write_word(*port, *data);
+                    IoType::WordOut(port, word_out) => {
+                        uart.write_word(port, word_out);
                     }
-                    IoType::ByteIn(port, _) => {
-                        if let Some(byte) = uart.read_byte(*port) {
-                            exit_reason = CpuExitReason::Io(IoType::ByteIn(*port, byte));
+                    IoType::ByteIn(port, io_byte) => {
+                        if let Some(byte) = uart.read_byte(port) {
+                            *io_byte = byte;
                         }
                     }
-                    IoType::WordIn(port, _) => {
-                        if let Some(word) = uart.read_word(*port) {
-                            exit_reason = CpuExitReason::Io(IoType::WordIn(*port, word));
+                    IoType::WordIn(port, io_word) => {
+                        if let Some(word) = uart.read_word(port) {
+                            *io_word = word;
                         }
                     }
                 },

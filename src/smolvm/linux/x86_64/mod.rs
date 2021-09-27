@@ -436,60 +436,42 @@ impl Cpu {
         Ok(())
     }
 
-    pub fn run(
-        &mut self,
-        prev_exit_reason: &CpuExitReason,
-    ) -> Result<CpuExitReason, std::io::Error> {
+    pub fn run(&mut self) -> Result<CpuExitReason, std::io::Error> {
         let run = &mut unsafe { std::slice::from_raw_parts_mut(self.vcpu_run, 1) }[0];
-
-        match prev_exit_reason {
-            CpuExitReason::Io(io_type) => unsafe {
-                let run_start = run as *mut kvm_run as *mut u8;
-                let io = &run.__bindgen_anon_1.io;
-                let _port = io.port;
-                let data_size = io.count as usize * io.size as usize;
-                let bytes_ptr = run_start.offset(io.data_offset as isize);
-                let io_bytes =
-                    std::slice::from_raw_parts_mut::<u8>(bytes_ptr as *mut u8, data_size);
-
-                match *io_type {
-                    IoType::ByteIn(_, byte) => io_bytes[0] = byte,
-                    IoType::WordIn(_, word) => {
-                        io_bytes[0] = word as u8;
-                        io_bytes[1] = (word >> 8) as u8
-                    }
-                    _ => {}
-                }
-            },
-            _ => {}
-        };
 
         unsafe { super::kvm_run(self.vcpu_fd, 0)? };
 
         let exit_reason = match run.exit_reason {
             KVM_EXIT_IO => unsafe {
+                // Emulation through setting the ax register makes this code
+                // being VERY slow. Fortunately, the kernel handles that
+                // part of the emulation.
                 let run_start = run as *mut kvm_run as *mut u8;
                 let io = &run.__bindgen_anon_1.io;
                 let port = io.port;
                 let data_size = io.count as usize * io.size as usize;
-                let bytes_ptr = run_start.offset(io.data_offset as isize);
-                let io_bytes =
-                    std::slice::from_raw_parts_mut::<u8>(bytes_ptr as *mut u8, data_size);
+                let data_ptr = run_start.offset(io.data_offset as isize);
 
                 match u32::from(io.direction) {
                     KVM_EXIT_IO_IN => match data_size {
-                        1 => CpuExitReason::Io(IoType::ByteIn(port, io_bytes[0])),
+                        1 => CpuExitReason::Io(IoType::ByteIn(
+                            port,
+                            &mut std::slice::from_raw_parts_mut(data_ptr as *mut _, data_size)[0],
+                        )),
                         2 => CpuExitReason::Io(IoType::WordIn(
                             port,
-                            io_bytes[0] as u16 | (io_bytes[1] as u16) << 8,
+                            &mut std::slice::from_raw_parts_mut(data_ptr as *mut _, data_size)[0],
                         )),
                         _ => CpuExitReason::NotSupported,
                     },
                     KVM_EXIT_IO_OUT => match data_size {
-                        1 => CpuExitReason::Io(IoType::ByteOut(port, io_bytes[0])),
+                        1 => CpuExitReason::Io(IoType::ByteOut(
+                            port,
+                            std::slice::from_raw_parts(data_ptr as *const _, data_size)[0],
+                        )),
                         2 => CpuExitReason::Io(IoType::WordOut(
                             port,
-                            io_bytes[0] as u16 | (io_bytes[1] as u16) << 8,
+                            std::slice::from_raw_parts(data_ptr as *const _, data_size)[0],
                         )),
                         _ => CpuExitReason::NotSupported,
                     },
