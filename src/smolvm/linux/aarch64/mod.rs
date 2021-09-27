@@ -16,7 +16,7 @@ use crate::smolvm::CpuExitReason;
 
 ioctl_read!(kvm_get_one_reg, KVMIO, 0xab, kvm_one_reg);
 ioctl_read!(kvm_set_one_reg, KVMIO, 0xac, kvm_one_reg);
-ioctl_read!(kvm_arm_vcpu_init, KVMIO, 0xae, kvm_vcpu_init);
+ioctl_write_ptr!(kvm_arm_vcpu_init, KVMIO, 0xae, kvm_vcpu_init);
 ioctl_read!(kvm_arm_preferred_target, KVMIO, 0xaf, kvm_vcpu_init);
 ioctl_write_ptr!(kvm_get_reg_list, KVMIO, 0xb0, kvm_reg_list);
 
@@ -75,24 +75,16 @@ impl Cpu {
 
         let exit_reason = match run.exit_reason {
             KVM_SYSTEM_EVENT_SHUTDOWN => {
-                let core_reg_base: u64 = 0x6030_0000_0010_0000;
-                let mut reg = kvm_one_reg {
-                    id: core_reg_base + 2 * 32,
-                    addr: 0,
-                };
-                unsafe { kvm_get_one_reg(self.vcpu_fd, &mut reg)? };
-                log::error!("Vcpu Exit {:#x} at {:#x}", run.exit_reason, reg.addr);
+                log::error!("Shutdown at {:#x}", self.get_instruction_pointer()?);
 
                 CpuExitReason::NotSupported
             }
             _ => {
-                let core_reg_base: u64 = 0x6030_0000_0010_0000;
-                let mut reg = kvm_one_reg {
-                    id: core_reg_base + 2 * 32,
-                    addr: 0,
-                };
-                unsafe { kvm_get_one_reg(self.vcpu_fd, &mut reg)? };
-                log::error!("Vcpu Exit {:#x} at {:#x}", run.exit_reason, reg.addr);
+                log::error!(
+                    "Vcpu Exit {:#x} at {:#x}",
+                    run.exit_reason,
+                    self.get_instruction_pointer()?
+                );
 
                 CpuExitReason::NotSupported
             }
@@ -103,10 +95,13 @@ impl Cpu {
 
     pub fn set_instruction_pointer(&mut self, ip: u64) -> Result<(), std::io::Error> {
         let core_reg_base: u64 = 0x6030_0000_0010_0000;
+
+        let mut reg_value = ip;
         let mut reg = kvm_one_reg {
             id: core_reg_base + 2 * 32,
-            addr: ip,
+            addr: &mut reg_value as *mut u64 as u64,
         };
+
         unsafe { kvm_set_one_reg(self.vcpu_fd, &mut reg)? };
 
         Ok(())
@@ -114,12 +109,15 @@ impl Cpu {
 
     pub fn get_instruction_pointer(&mut self) -> Result<u64, std::io::Error> {
         let core_reg_base: u64 = 0x6030_0000_0010_0000;
+
+        let mut reg_value = 0;
         let mut reg = kvm_one_reg {
             id: core_reg_base + 2 * 32,
-            addr: 0,
+            addr: &mut reg_value as *mut u64 as u64,
         };
+
         unsafe { kvm_get_one_reg(self.vcpu_fd, &mut reg)? };
 
-        Ok(reg.addr)
+        Ok(reg_value)
     }
 }
