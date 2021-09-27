@@ -171,7 +171,7 @@ impl SmolVm {
 
         #[cfg(target_arch = "x86_64")]
         {
-            cpu.set_gp_register(self::x86_64::GpRegister::Rsi, params_page)?;
+            cpu.set_gp_register(self::x86_64::CpuRegister::Rsi, params_page)?;
         }
 
         let cpu = Arc::new(Mutex::new(cpu));

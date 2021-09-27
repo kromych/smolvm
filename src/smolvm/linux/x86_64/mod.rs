@@ -31,7 +31,7 @@ ioctl_readwrite!(kvm_get_supported_cpuid, KVMIO, 0x05, kvm_cpuid2);
 ioctl_write_ptr!(kvm_set_cpuid2, KVMIO, 0x90, kvm_cpuid2);
 
 #[allow(dead_code)]
-pub enum GpRegister {
+pub enum CpuRegister {
     Rax,
     Rcx,
     Rdx,
@@ -420,25 +420,25 @@ impl Cpu {
         Ok(())
     }
 
-    pub fn set_gp_register(&mut self, gpr: GpRegister, v: u64) -> Result<(), std::io::Error> {
+    pub fn set_gp_register(&mut self, gpr: CpuRegister, v: u64) -> Result<(), std::io::Error> {
         let mut regs = self.get_regs()?;
         match gpr {
-            GpRegister::Rax => regs.rax = v,
-            GpRegister::Rcx => regs.rcx = v,
-            GpRegister::Rdx => regs.rdx = v,
-            GpRegister::Rbx => regs.rbx = v,
-            GpRegister::Rsp => regs.rsp = v,
-            GpRegister::Rbp => regs.rbp = v,
-            GpRegister::Rsi => regs.rsi = v,
-            GpRegister::Rdi => regs.rdi = v,
-            GpRegister::R8 => regs.r8 = v,
-            GpRegister::R9 => regs.r9 = v,
-            GpRegister::R10 => regs.r10 = v,
-            GpRegister::R11 => regs.r11 = v,
-            GpRegister::R12 => regs.r12 = v,
-            GpRegister::R13 => regs.r13 = v,
-            GpRegister::R14 => regs.r14 = v,
-            GpRegister::R15 => regs.r15 = v,
+            CpuRegister::Rax => regs.rax = v,
+            CpuRegister::Rcx => regs.rcx = v,
+            CpuRegister::Rdx => regs.rdx = v,
+            CpuRegister::Rbx => regs.rbx = v,
+            CpuRegister::Rsp => regs.rsp = v,
+            CpuRegister::Rbp => regs.rbp = v,
+            CpuRegister::Rsi => regs.rsi = v,
+            CpuRegister::Rdi => regs.rdi = v,
+            CpuRegister::R8 => regs.r8 = v,
+            CpuRegister::R9 => regs.r9 = v,
+            CpuRegister::R10 => regs.r10 = v,
+            CpuRegister::R11 => regs.r11 = v,
+            CpuRegister::R12 => regs.r12 = v,
+            CpuRegister::R13 => regs.r13 = v,
+            CpuRegister::R14 => regs.r14 = v,
+            CpuRegister::R15 => regs.r15 = v,
         }
         self.set_regs(&regs)?;
 
