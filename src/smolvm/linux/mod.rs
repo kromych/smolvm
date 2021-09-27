@@ -127,8 +127,10 @@ impl SmolVm {
         let params_slice = unsafe {
             std::slice::from_raw_parts(
                 {
-                    let mut params = BootParams::default();
-                    params.e820_entries = spans.len() as u8;
+                    let mut params = BootParams {
+                        e820_entries: spans.len() as u8,
+                        ..Default::default()
+                    };
 
                     for i in 0..params.e820_entries {
                         params.e820_table[i as usize] = BootE820Entry {

@@ -152,17 +152,15 @@ impl Uart {
     }
 
     pub fn write_word(&mut self, address: u16, data: u16) {
-        if self.divisor_latch_active() {
-            if address == self.base_addr {
-                self.divisor_latch[0] = (data & 0xff) as u8;
-                self.divisor_latch[1] = (data >> 8) as u8;
+        if self.divisor_latch_active() && address == self.base_addr {
+            self.divisor_latch[0] = data as u8;
+            self.divisor_latch[1] = (data >> 8) as u8;
 
-                return;
-            }
+            return;
         }
 
         if let Some(offset) = self.register_offset(address) {
-            self.registers[offset] = data as u8 & 0xff;
+            self.registers[offset] = data as u8;
         } else {
             log::warn!(
                 "Writing {} at to {:#x}, base {:#x}, not implemented",
@@ -196,10 +194,8 @@ impl Uart {
     }
 
     pub fn read_word(&mut self, address: u16) -> Option<u16> {
-        if self.divisor_latch_active() {
-            if address == self.base_addr {
-                return Some(self.divisor_latch[0] as u16 | ((self.divisor_latch[1] as u16) << 8));
-            }
+        if self.divisor_latch_active() && address == self.base_addr {
+            return Some(self.divisor_latch[0] as u16 | ((self.divisor_latch[1] as u16) << 8));
         }
 
         if let Some(offset) = self.register_offset(address) {
