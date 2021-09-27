@@ -54,6 +54,7 @@ pub const REG_ARM_COPROC_SHIFT: u64 = 16;
 
 // Normal registers are mapped as coprocessor 16
 pub const REG_ARM_CORE: u64 = 0x0010 << REG_ARM_COPROC_SHIFT;
+pub const REG_ARM64_SYSREG: u64 = 0x0013 << REG_ARM_COPROC_SHIFT;
 
 pub const REG_ARM64: u64 = 0x6000000000000000;
 pub const REG_ARM64_CORE_BASE: u64 = REG_ARM64 | REG_ARM_CORE;
