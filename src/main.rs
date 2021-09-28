@@ -4,26 +4,57 @@ use smolvm::{HvError, SmolVmT};
 
 use crate::smolvm::GpaSpan;
 
+#[macro_use]
+extern crate clap;
+
 #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
 compile_error!("Unsupported target architecture");
 
 mod smolvm;
 
 fn main() -> Result<(), HvError> {
-    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
+    let matches = clap_app!(smolvm =>
+        (about: "Examples of using virtualization APIs")
+        (@arg KERNEL_PATH: -k --kernel +takes_value "Path to the ELF binary (Linux kernel perhaps)")
+        (@arg KERNEL_CMD_LINE: -c --cmd_line +takes_value "Kernel command line")
+        (@arg DTB_PATH: -d --dtb +takes_value "Path to the Device Tree Blob")
+        (@arg LOG_LEVEL: -l --log_level +takes_value ... "Sets the level of debugging information")
+    )
+    .get_matches();
 
-    let args = std::env::args().collect::<Vec<_>>();
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or(
+        if let Some(level) = matches.value_of("LOG_LEVEL") {
+            level
+        } else {
+            "info"
+        },
+    ))
+    .init();
 
-    if args.len() == 2 {
-        run_kernel(&args[1])?
+    if let Some(kernel_path) = matches.value_of("KERNEL_PATH") {
+        log::info!("Kernel path {}", kernel_path);
+        let command_line = if let Some(command_line) = matches.value_of("KERNEL_CMD_LINE") {
+            command_line
+        } else {
+            ""
+        };
+
+        let dtb_path = if let Some(dtb_path) = matches.value_of("DTB_PATH") {
+            dtb_path
+        } else {
+            ""
+        };
+
+        run_kernel(kernel_path, command_line, dtb_path)?;
     } else {
-        run_until_halt()?
+        log::info!("Path to the kernel was not specified, running a smol test");
+        run_until_halt()?;
     }
 
     Ok(())
 }
 
-fn run_kernel(kernel_path: &str) -> Result<(), HvError> {
+fn run_kernel(kernel_path: &str, command_line: &str, dtb_path: &str) -> Result<(), HvError> {
     log::info!("Opening {}", kernel_path);
 
     let file = fs::File::open(&kernel_path).unwrap();
@@ -32,7 +63,7 @@ fn run_kernel(kernel_path: &str) -> Result<(), HvError> {
     #[cfg(target_arch = "x86_64")]
     let gpa_start = 0;
     #[cfg(target_arch = "aarch64")]
-    let gpa_start = 0x1_000_0000;
+    let gpa_start = 0x1000_0000;
 
     let mut vm = smolvm::create_vm(&[GpaSpan {
         start: gpa_start,
@@ -58,7 +89,7 @@ fn run_until_halt() -> Result<(), HvError> {
     #[cfg(target_arch = "aarch64")]
     {
         let mut vm = smolvm::create_vm(&[GpaSpan {
-            start: 0x80_000_000,
+            start: 0x1000_0000,
             size: 64 * 1024 * 1024,
         }])?;
         vm.load_bin(
@@ -71,7 +102,7 @@ fn run_until_halt() -> Result<(), HvError> {
                 // 0x02, 0x00, 0x00, 0xd4, /* hvc #0x0 */
                 0x00, 0x00, 0x00, 0x14, /* b <this address> */
             ],
-            0x80_000_000,
+            0x1000_0000,
         );
         vm.run_once().map(|_| ())?
     }
