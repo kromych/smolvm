@@ -11,7 +11,7 @@ pub use ahv::HypervisorError as HvError;
 use ahv::{MemoryPermission, VirtualMachine};
 
 #[cfg(target_arch = "aarch64")]
-pub use self::aarch64::{Cpu, CpuExit};
+pub use self::aarch64::Cpu;
 use super::{GpaSpan, MappedGpa, Memory};
 
 pub struct SmolVm {

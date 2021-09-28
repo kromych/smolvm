@@ -1,6 +1,6 @@
 #![cfg(target_arch = "aarch64")]
 
-pub use ahv::VirtualCpuExitReason as CpuExit;
+use crate::smolvm::CpuExitReason;
 use ahv::{HypervisorError, Register, VirtualCpu, VirtualCpuExitReason};
 
 pub struct Cpu {
@@ -19,7 +19,7 @@ impl Cpu {
         Ok(())
     }
 
-    pub fn run(&mut self) -> Result<CpuExit, HypervisorError> {
+    pub fn run(&mut self) -> Result<CpuExitReason, HypervisorError> {
         let exit = self.vcpu.run()?;
 
         match exit {
@@ -32,7 +32,7 @@ impl Cpu {
             e => panic!("Unsupported Vcpu Exit {:?}", e),
         }
 
-        Ok(exit)
+        Ok(CpuExitReason::NotSupported)
     }
 
     pub fn set_instruction_pointer(&mut self, ip: u64) -> Result<(), HypervisorError> {

@@ -1,7 +1,7 @@
 #[cfg(target_os = "macos")]
 mod darwin;
 #[cfg(target_os = "macos")]
-pub use darwin::{Cpu, CpuExit, HvError, SmolVm};
+pub use darwin::{Cpu, HvError, SmolVm};
 
 #[cfg(target_os = "linux")]
 mod linux;
