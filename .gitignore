@@ -1,2 +1,6 @@
 /target
 /traces
+smolkernel.elf
+smolkernel.bin
+/dtb
+*.o
