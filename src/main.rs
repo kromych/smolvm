@@ -33,17 +33,9 @@ fn main() -> Result<(), HvError> {
 
     if let Some(kernel_path) = matches.value_of("KERNEL_PATH") {
         log::info!("Kernel path {}", kernel_path);
-        let command_line = if let Some(command_line) = matches.value_of("KERNEL_CMD_LINE") {
-            command_line
-        } else {
-            ""
-        };
 
-        let dtb_path = if let Some(dtb_path) = matches.value_of("DTB_PATH") {
-            dtb_path
-        } else {
-            ""
-        };
+        let command_line = matches.value_of("KERNEL_CMD_LINE");
+        let dtb_path = matches.value_of("DTB_PATH");
 
         run_kernel(kernel_path, command_line, dtb_path)?;
     } else {
@@ -54,7 +46,11 @@ fn main() -> Result<(), HvError> {
     Ok(())
 }
 
-fn run_kernel(kernel_path: &str, command_line: &str, dtb_path: &str) -> Result<(), HvError> {
+fn run_kernel(
+    kernel_path: &str,
+    command_line: Option<&str>,
+    dtb_path: Option<&str>,
+) -> Result<(), HvError> {
     log::info!("Opening {}", kernel_path);
 
     let file = fs::File::open(&kernel_path).unwrap();
@@ -67,9 +63,9 @@ fn run_kernel(kernel_path: &str, command_line: &str, dtb_path: &str) -> Result<(
 
     let mut vm = smolvm::create_vm(&[GpaSpan {
         start: gpa_start,
-        size: 64 * 1024 * 1024,
+        size: 512 * 1024 * 1024,
     }])?;
-    vm.load_kernel_elf(&*file);
+    vm.load_kernel_elf(&*file, command_line, dtb_path);
     vm.run()?;
 
     Ok(())

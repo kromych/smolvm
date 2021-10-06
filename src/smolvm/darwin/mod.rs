@@ -5,6 +5,7 @@ pub use self::x86_64::{Cpu, CpuExit};
 
 #[cfg(target_arch = "aarch64")]
 mod aarch64;
+pub use ahv::Register as CpuRegister;
 use std::sync::{Arc, Mutex};
 
 pub use ahv::HypervisorError as HvError;

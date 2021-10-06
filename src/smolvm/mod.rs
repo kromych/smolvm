@@ -1,11 +1,14 @@
 #[cfg(target_os = "macos")]
 mod darwin;
 #[cfg(target_os = "macos")]
-pub use darwin::{Cpu, HvError, SmolVm};
+pub use darwin::{Cpu, CpuRegister, HvError, SmolVm};
 
 #[cfg(target_os = "linux")]
 mod linux;
-use std::sync::{Arc, Mutex};
+use std::{
+    io::Read,
+    sync::{Arc, Mutex},
+};
 
 #[cfg(target_os = "linux")]
 pub use linux::{Cpu, HvError, SmolVm};
@@ -16,6 +19,7 @@ use object::{
 };
 
 use self::uart::Uart;
+use zerocopy::AsBytes;
 
 mod uart;
 
@@ -138,6 +142,21 @@ impl Memory {
         }
     }
 
+    pub fn fill(&mut self, gpa: u64, size: usize, fill_byte: u8) {
+        if let Some(span) = self.find_span(gpa) {
+            let span = unsafe {
+                std::slice::from_raw_parts_mut(
+                    (span.memory as u64 + (gpa - span.gpa)) as *mut u8,
+                    span.size - (gpa as usize - span.gpa as usize),
+                )
+            };
+
+            span[..size].fill(fill_byte);
+        } else {
+            panic!("Cannot write as GPA is invalid {:#x}", gpa);
+        }
+    }
+
     pub fn _read(&self, gpa: u64, size: usize) -> &[u8] {
         if let Some(span) = self.find_span(gpa) {
             let span = unsafe {
@@ -208,14 +227,19 @@ pub trait SmolVmT {
         }
     }
 
-    fn load_kernel_elf(&mut self, elf_data: &[u8]) {
+    fn load_kernel_elf(
+        &mut self,
+        elf_data: &[u8],
+        command_line: Option<&str>,
+        dtb_path: Option<&str>,
+    ) {
         #[derive(Default, Clone, Copy)]
         struct SegmentToLoad {
             offset: u64,
             _virt_addr: u64,
             phys_addr: u64,
             file_size: u64,
-            _memory_size: u64,
+            memory_size: u64,
             _align: u64,
             _flags: u32,
         }
@@ -275,7 +299,7 @@ pub trait SmolVmT {
                                 _virt_addr: virt_addr,
                                 phys_addr: phys_addr & !0xffff800000000000, /* TODO why? */
                                 file_size,
-                                _memory_size: memory_size,
+                                memory_size,
                                 _align: align,
                                 _flags: flags,
                             });
@@ -336,14 +360,18 @@ pub trait SmolVmT {
         let memory = self.get_memory();
         let mut memory = memory.lock().unwrap();
 
+        // TODO Replace with a real allocator
+        let mut last_gpa_used: u64 = 0;
+
         // Not setting protection, the guest is expected to set up
         // that in the page tables for itself
         for segment_to_load in segments_to_load {
-            let size = segment_to_load.file_size as usize;
+            let memory_size = segment_to_load.memory_size as usize;
+            let file_size = segment_to_load.file_size as usize;
             let image_start = segment_to_load.offset as usize;
-            let image_end = image_start + size;
+            let image_end = image_start + file_size;
             let pa_start = segment_to_load.phys_addr as usize;
-            let pa_end = pa_start + size;
+            let pa_end = pa_start + memory_size;
 
             log::info!(
                 "Loading image data from [0x{:x}; 0x{:x}] into [0x{:x}; 0x{:x}]",
@@ -353,11 +381,36 @@ pub trait SmolVmT {
                 pa_end
             );
 
+            // TODO Replace with proper detection of the BSS sections
+            // Zero out the segment in the memory
+            memory.fill(pa_start as u64, pa_end - pa_start, 0);
+            // Load from the image
             memory.write(pa_start as u64, &elf_data[image_start..image_end]);
+
+            if pa_end as u64 > last_gpa_used {
+                last_gpa_used = pa_end as u64;
+            }
         }
+
+        log::info!("Last GPA used: {:#x}", last_gpa_used);
 
         let cpu = self.get_cpu();
         let mut cpu = cpu.lock().unwrap();
+
+        if let Some(dtb_path) = dtb_path {
+            let mut dtb_file = std::fs::File::open(dtb_path).unwrap();
+            let mut dtb_data = Vec::new();
+            dtb_file.read_to_end(&mut dtb_data).unwrap();
+
+            memory.write(last_gpa_used, dtb_data.as_bytes());
+            log::info!("Loaded DTB at GPA: {:#x}", last_gpa_used);
+
+            #[cfg(target_arch = "aarch64")]
+            {
+                cpu.set_register(CpuRegister::X0, last_gpa_used).unwrap();
+            }
+        }
+
         cpu.set_instruction_pointer(entry & !0xffff800000000000 /* TODO hack */)
             .unwrap();
     }

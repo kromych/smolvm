@@ -43,4 +43,13 @@ impl Cpu {
         let ip = self.vcpu.get_register(Register::PC)?;
         Ok(ip)
     }
+
+    pub fn set_register(&mut self, reg: Register, value: u64) -> Result<(), HypervisorError> {
+        self.vcpu.set_register(reg, value)
+    }
+
+    pub fn get_register(&mut self, reg: Register) -> Result<u64, HypervisorError> {
+        let value = self.vcpu.get_register(reg)?;
+        Ok(value)
+    }
 }
