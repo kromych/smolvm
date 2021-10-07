@@ -1,6 +1,6 @@
 	.arch armv8-a
 	.file	"start.S"
-    .extern start_kernel, _IMAGE_SIZE
+    .extern start_kernel, relocate, clean_bss, _IMAGE_SIZE
 	.global	_start
 
 	.section ".head.text", "ax", @progbits
@@ -23,6 +23,8 @@
 _start:
     adr     x20, stack_top
     mov     sp, x20
+	// bl relocate
+	// bl clean_bss
 	bl      start_kernel
 1:
 	b       1b
