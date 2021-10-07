@@ -9,7 +9,7 @@ ENTRY(_start)
 
 SECTIONS
 {
-    . = 0x10000000;
+    . = 0x40200000;
     _IMAGE_START = .;
 
     _TEXT_BEGIN = .;
@@ -29,6 +29,22 @@ SECTIONS
         *(.rodata*)
     }
     _RODATA_END = .;
+
+    _RELRO_BEGIN = .;
+    .data.rel.ro : {
+        *(.data.rel.ro*)
+    }
+    _RELRO_END = .;
+
+    _RELA_BEGIN = .;
+    .rela.dyn : {
+        *(.rela.dyn*)
+    }
+    _RELA_END = .;
+
+    .dynamic : {
+        *(.dynamic*)
+    }
 
     _DATA_BEGIN = .;
     .data ALIGN(4K) : {
