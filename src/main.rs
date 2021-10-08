@@ -59,7 +59,7 @@ fn run_kernel(
     #[cfg(target_arch = "x86_64")]
     let gpa_start = 0;
     #[cfg(target_arch = "aarch64")]
-    let gpa_start = 0x1000_0000;
+    let gpa_start = 0x4000_0000;
 
     let mut vm = smolvm::create_vm(&[GpaSpan {
         start: gpa_start,

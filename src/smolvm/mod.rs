@@ -18,10 +18,11 @@ use object::{
     Architecture, Endianness, FileKind, Object, ObjectSection, SectionKind,
 };
 
-use self::uart::Uart;
+use self::{pl011::UartPl011, uart8250::Uart8250};
 use zerocopy::AsBytes;
 
-mod uart;
+mod pl011;
+mod uart8250;
 
 pub struct GpaSpan {
     pub start: u64,
@@ -202,6 +203,18 @@ pub enum IoType<'a> {
     ByteOut(u16 /* port */, u8 /* data */),
     WordIn(u16 /* port */, &'a mut u16 /* data */),
     WordOut(u16 /* port */, u16 /* data */),
+}
+
+#[derive(PartialEq)]
+pub enum MmIoType<'a> {
+    ByteIn(u16 /* port */, &'a mut u8 /* data */),
+    ByteOut(u16 /* port */, u8 /* data */),
+    WordIn(u16 /* port */, &'a mut u16 /* data */),
+    WordOut(u16 /* port */, u16 /* data */),
+    DoubleWordIn(u16 /* port */, &'a mut u32 /* data */),
+    DoubleWordOut(u16 /* port */, u32 /* data */),
+    QuadWordIn(u16 /* port */, &'a mut u64 /* data */),
+    QuadWordOut(u16 /* port */, u64 /* data */),
 }
 
 #[derive(PartialEq)]
@@ -445,7 +458,8 @@ pub trait SmolVmT {
     fn run(&mut self) -> Result<CpuExitReason, HvError> {
         let cpu = self.get_cpu();
         let mut cpu = cpu.lock().unwrap();
-        let mut uart = Uart::new(uart::UartBase::Com1);
+        let mut uart8250 = Uart8250::new(uart8250::UartBase::Com1);
+        let mut pl011 = UartPl011::new(0x9000000);
 
         loop {
             let exit_reason = cpu.run()?;
@@ -455,18 +469,18 @@ pub trait SmolVmT {
                 CpuExitReason::Halt => {}
                 CpuExitReason::Io(io_type) => match io_type {
                     IoType::ByteOut(port, byte_out) => {
-                        uart.write_byte(port, byte_out);
+                        uart8250.write_byte(port, byte_out);
                     }
                     IoType::WordOut(port, word_out) => {
-                        uart.write_word(port, word_out);
+                        uart8250.write_word(port, word_out);
                     }
                     IoType::ByteIn(port, io_byte) => {
-                        if let Some(byte) = uart.read_byte(port) {
+                        if let Some(byte) = uart8250.read_byte(port) {
                             *io_byte = byte;
                         }
                     }
                     IoType::WordIn(port, io_word) => {
-                        if let Some(word) = uart.read_word(port) {
+                        if let Some(word) = uart8250.read_word(port) {
                             *io_word = word;
                         }
                     }

@@ -88,14 +88,14 @@ const MSR_OFFSET: u8 = 6;
 const SCR_OFFSET: u8 = 7;
 
 #[derive(Default)]
-pub struct Uart {
+pub struct Uart8250 {
     base_addr: u16,
     divisor_latch: [u8; 2],
     registers: [u8; 8],
     buffer: Vec<u8>,
 }
 
-impl Uart {
+impl Uart8250 {
     pub fn new(base: UartBase) -> Self {
         let mut uart = Self {
             base_addr: match base {

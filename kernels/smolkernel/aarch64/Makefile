@@ -4,7 +4,7 @@ TOOLCHAIN=elf
 CC=aarch64-unknown-$(TOOLCHAIN)-gcc
 LD=aarch64-unknown-$(TOOLCHAIN)-ld
 OBJCOPY=aarch64-unknown-$(TOOLCHAIN)-objcopy
-CFLAGS=-O2 -ffreestanding -nostartfiles -static -march=armv8-a -mcmodel=large -mgeneral-regs-only \
+CFLAGS=-O2 -g -ffreestanding -nostartfiles -static -march=armv8-a -mcmodel=large -mgeneral-regs-only \
 		-fno-asynchronous-unwind-tables -fno-unwind-tables \
 		-mbranch-protection=none 
 # --save-temps
