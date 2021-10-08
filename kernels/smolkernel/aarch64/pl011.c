@@ -88,8 +88,8 @@ void pl011_init(struct pl011_t *pl011)
 
     // Mask interrupts
     pl011_write(pl011, UARTIMSC, 0x000);
-    // Disable interrupts (lower 10 bits)
-    pl011_write(pl011, UARTICR, 0x3ff);
+    // Disable interrupts (lower 11 bits)
+    pl011_write(pl011, UARTICR, 0x7ff);
     // Disable DMA on Rx and Tx
     pl011_write(pl011, UARTDMACR, 0x0);
 
