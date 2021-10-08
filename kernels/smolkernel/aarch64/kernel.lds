@@ -56,6 +56,10 @@ SECTIONS
     .bss ALIGN(4K) : {
         *(COMMON)
         *(.bss*)
+        /* Allocate room for stack */
+        .   =  ALIGN(8);
+        .   += 4096;
+        _stack_top =  . - 16;        
     }
     _BSS_END = .;
 
