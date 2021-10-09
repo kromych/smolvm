@@ -85,9 +85,9 @@ impl UartPl011 {
     pub fn new(base_addr: u64) -> Self {
         let mut registers = vec![0_u32; 0x48];
 
-        registers[UART_FR] = UART_FR_RX_EMPTY | UART_FR_TX_EMPTY;
-        registers[UART_CR] = UART_CR_RX_ENABLE | UART_CR_TX_ENABLE;
-        registers[UART_IFLS] = UARTIFLS_RX_HALF_FULL | UARTIFLS_TX_HALF_FULL;
+        registers[UART_FR >> 2] = UART_FR_RX_EMPTY | UART_FR_TX_EMPTY;
+        registers[UART_CR >> 2] = UART_CR_RX_ENABLE | UART_CR_TX_ENABLE;
+        registers[UART_IFLS >> 2] = UARTIFLS_RX_HALF_FULL | UARTIFLS_TX_HALF_FULL;
 
         let id = [0x11, 0x10, 0x4a, 0x00, 0x0D, 0xF0, 0x05, 0xB1];
 
@@ -102,10 +102,10 @@ impl UartPl011 {
     pub fn read(&mut self, addr: u64) -> Option<u32> {
         if let Some(offset) = self.get_offset(addr) {
             if let Some(mask) = Self::check_access_and_get_mask(Pl011Access::Read, offset) {
-                if offset >= UART_PCELL_ID0 {
-                    Some(self.id[offset - UART_PCELL_ID0] as u32 & mask)
+                if offset >= UART_PERIPH_ID0 {
+                    Some(self.id[(offset - UART_PERIPH_ID0) >> 2] as u32 & mask)
                 } else {
-                    Some(self.registers[offset] & mask)
+                    Some(self.registers[offset >> 2] & mask)
                 }
             } else {
                 log::warn!("Unsupported MMIO read from 0x{:x}", addr);
@@ -120,7 +120,7 @@ impl UartPl011 {
     pub fn write(&mut self, addr: u64, value: u32) {
         if let Some(offset) = self.get_offset(addr) {
             if let Some(mask) = Self::check_access_and_get_mask(Pl011Access::Write, offset) {
-                self.registers[offset] = value & mask;
+                self.registers[offset >> 2] = value & mask;
                 if offset == 0 {
                     self.buffer.push(value as u8);
 
