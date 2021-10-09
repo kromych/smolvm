@@ -53,3 +53,22 @@ qemu-system-aarch64 -kernel kernels/linux-5.14-stable/aarch64/Image -machine vir
 For tracing, add `--trace "*"` options to the command-line
 To dump the device tree block, append `,dumpdtb=out-file-name` to the machine model.
 To convert the binary dtb file to a text form: `dtc -I dtb -O dts -o text.dts bin.dtb`
+
+The aarch64 `smolkernel` run under `qemu` reports for select EL1 system registers:
+```
+PL011 ID 0x111014000df005b10
+VBAR_EL1    0x0000000000000000
+MIDR_EL1    0x00000000410fd034
+MPIDR_EL1   0x0000000080000000
+MDSCR_EL1   0x0000000000000000
+SCTLR_EL1   0x0000000030d50998
+SPSR_EL1    0x0000000000000000
+TCR_EL1     0x0000000000000000
+TTBR0_EL1   0x0000000000000000
+TTBR1_EL1   0x0000000000000000
+ESR_EL1     0x0000000000000000
+ELR_EL1     0x0000000000000000
+MAIR_EL1    0x0000000000000000
+CPACR_EL1   0x0000000000000000
+DAIF        0x00000000000003c0
+```

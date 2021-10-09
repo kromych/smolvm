@@ -1,12 +1,41 @@
 #![cfg(target_arch = "aarch64")]
 
 use crate::smolvm::{CpuExitReason, MmIoType};
-use ahv::{HypervisorError, Register, VirtualCpu, VirtualCpuExitReason};
+use ahv::{HypervisorError, Register, SystemRegister, VirtualCpu, VirtualCpuExitReason};
+
+// https://developer.arm.com/documentation/ddi0595/2021-09/AArch64-Registers/SCTLR-EL1--System-Control-Register--EL1-?lang=en
+const SCTLR_RESERVED_MUST_BE_1: u64 = (3 << 28) | (3 << 22) | (1 << 20) | (1 << 11);
+const SCTLR_EE_LITTLE_ENDIAN: u64 = 0 << 25;
+const SCTLR_EOE_LITTLE_ENDIAN: u64 = 0 << 24;
+const SCTLR_TRAP_WFE: u64 = 1 << 18;
+const SCTLR_TRAP_WFI: u64 = 1 << 16;
+const SCTLR_I_CACHE_DISABLED: u64 = 0 << 12;
+const SCTLR_EXCEPTION_EXIT_CONTEXT_SYNC: u64 = 1 << 11;
+const SCTLR_STACK_ALIGNMENT_EL0: u64 = 1 << 4;
+const SCTLR_STACK_ALIGNMENT: u64 = 1 << 3;
+const SCTLR_D_CACHE_DISABLED: u64 = 0 << 2;
+const SCTLR_MMU_DISABLED: u64 = 0 << 0;
+const SCTLR_MMU_ENABLED: u64 = 1 << 0;
+
+const SCTLR_INITIAL_VALUE: u64 = SCTLR_RESERVED_MUST_BE_1
+    | SCTLR_EE_LITTLE_ENDIAN
+    | SCTLR_TRAP_WFE
+    | SCTLR_TRAP_WFI
+    | SCTLR_EXCEPTION_EXIT_CONTEXT_SYNC
+    | SCTLR_I_CACHE_DISABLED
+    | SCTLR_D_CACHE_DISABLED
+    | SCTLR_STACK_ALIGNMENT
+    | SCTLR_STACK_ALIGNMENT_EL0
+    | SCTLR_MMU_DISABLED;
+
+// https://developer.arm.com/documentation/ddi0595/2021-09/AArch64-Registers/MIDR-EL1--Main-ID-Register?lang=en
+pub const MIDR_EL1_INITIAL_VALUE: u64 = 0x00000000410fd034;
 
 pub struct Cpu {
     vcpu: VirtualCpu,
     mmio: u64,
     mmio_register_load: Option<Register>,
+    sctrl_e1: u64,
 }
 
 impl Cpu {
@@ -15,11 +44,21 @@ impl Cpu {
             vcpu,
             mmio: 0,
             mmio_register_load: None,
+            sctrl_e1: SCTLR_INITIAL_VALUE,
         })
     }
 
     pub fn init(&mut self) -> Result<(), HypervisorError> {
         self.vcpu.set_register(Register::CPSR, 0x3c4)?;
+
+        log::info!("Setting MIDR_EL1 to 0x{:x}", MIDR_EL1_INITIAL_VALUE);
+        self.vcpu
+            .set_system_register(SystemRegister::MIDR_EL1, MIDR_EL1_INITIAL_VALUE)?;
+
+        log::info!("Setting SCTLR_EL1 to 0x{:x}", &self.sctrl_e1);
+        self.vcpu
+            .set_system_register(SystemRegister::SCTLR_EL1, self.sctrl_e1)?;
+
         self.vcpu.set_trap_debug_exceptions(true)?;
 
         Ok(())
