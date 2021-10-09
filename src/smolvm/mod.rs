@@ -207,14 +207,12 @@ pub enum IoType<'a> {
 
 #[derive(PartialEq)]
 pub enum MmIoType<'a> {
-    ByteIn(u16 /* port */, &'a mut u8 /* data */),
-    ByteOut(u16 /* port */, u8 /* data */),
-    WordIn(u16 /* port */, &'a mut u16 /* data */),
-    WordOut(u16 /* port */, u16 /* data */),
-    DoubleWordIn(u16 /* port */, &'a mut u32 /* data */),
-    DoubleWordOut(u16 /* port */, u32 /* data */),
-    QuadWordIn(u16 /* port */, &'a mut u64 /* data */),
-    QuadWordOut(u16 /* port */, u64 /* data */),
+    ByteIn(u64 /* address */, &'a mut u8 /* data */),
+    ByteOut(u64 /* address */, u8 /* data */),
+    WordIn(u64 /* address */, &'a mut u16 /* data */),
+    WordOut(u64 /* address */, u16 /* data */),
+    DoubleWordIn(u64 /* address */, &'a mut u32 /* data */),
+    DoubleWordOut(u64 /* address */, u32 /* data */),
 }
 
 #[derive(PartialEq)]
@@ -222,6 +220,7 @@ pub enum CpuExitReason<'a> {
     NotSupported,
     Halt,
     Io(IoType<'a>),
+    MmIo(MmIoType<'a>),
 }
 
 pub trait SmolVmT {
@@ -483,6 +482,32 @@ pub trait SmolVmT {
                         if let Some(word) = uart8250.read_word(port) {
                             *io_word = word;
                         }
+                    }
+                },
+                CpuExitReason::MmIo(mmio_type) => match mmio_type {
+                    MmIoType::ByteIn(addr, data) => {
+                        if let Some(value) = pl011.read(addr) {
+                            *data = value as u8;
+                        }
+                    }
+                    MmIoType::ByteOut(addr, data) => {
+                        pl011.write(addr, data as u32);
+                    }
+                    MmIoType::WordIn(addr, data) => {
+                        if let Some(value) = pl011.read(addr) {
+                            *data = value as u16;
+                        }
+                    }
+                    MmIoType::WordOut(addr, data) => {
+                        pl011.write(addr, data as u32);
+                    }
+                    MmIoType::DoubleWordIn(addr, data) => {
+                        if let Some(value) = pl011.read(addr) {
+                            *data = value as u32;
+                        }
+                    }
+                    MmIoType::DoubleWordOut(addr, data) => {
+                        pl011.write(addr, data);
                     }
                 },
             }

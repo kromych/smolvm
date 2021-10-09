@@ -1,16 +1,21 @@
 #![cfg(target_arch = "aarch64")]
 
-use crate::smolvm::CpuExitReason;
+use crate::smolvm::{CpuExitReason, MmIoType};
 use ahv::{HypervisorError, Register, VirtualCpu, VirtualCpuExitReason};
 
 pub struct Cpu {
     vcpu: VirtualCpu,
-    mmio: [u8; 8],
+    mmio: u64,
+    mmio_register_load: Option<Register>,
 }
 
 impl Cpu {
     pub fn new(vcpu: VirtualCpu) -> Result<Self, HypervisorError> {
-        Ok(Self { vcpu, mmio: [0; 8] })
+        Ok(Self {
+            vcpu,
+            mmio: 0,
+            mmio_register_load: None,
+        })
     }
 
     pub fn init(&mut self) -> Result<(), HypervisorError> {
@@ -21,65 +26,111 @@ impl Cpu {
     }
 
     pub fn run(&mut self) -> Result<CpuExitReason, HypervisorError> {
-        let exit = self.vcpu.run()?;
+        // Finish pending MMIO if any
+        if let Some(register) = self.mmio_register_load {
+            self.set_register(register, self.mmio)?;
+            self.mmio_register_load = None;
+        }
 
-        match exit {
+        let vcpu_exit = self.vcpu.run()?;
+
+        let exit = match vcpu_exit {
             VirtualCpuExitReason::Exception { exception } => {
-                // https://developer.arm.com/documentation/ddi0595/2021-09/AArch64-Registers/ESR-EL2--Exception-Syndrome-Register--EL2-?lang=en
                 let syndrome = exception.syndrome;
                 let ec = (syndrome >> 26) & 0x3f;
+
+                // https://developer.arm.com/documentation/ddi0595/2021-09/AArch64-Registers/ESR-EL2--Exception-Syndrome-Register--EL2-?lang=en
                 match ec {
+                    0b011000 => {
+                        // MSR, MRS, or System instruction
+                        // https://developer.arm.com/documentation/ddi0595/2021-09/AArch64-Registers/ESR-EL2--Exception-Syndrome-Register--EL2-?lang=en#fieldset_0-24_0_13
+                        CpuExitReason::NotSupported
+                    }
                     0b100100 => {
                         // Data abort
                         // https://developer.arm.com/documentation/ddi0595/2021-09/AArch64-Registers/ESR-EL2--Exception-Syndrome-Register--EL2-?lang=en#fieldset_0-24_0_16
                         let instr_syndrome_valid = ((syndrome >> 24) & 1) != 0;
                         if instr_syndrome_valid {
-                            let is_trapped_instr_32_bit = ((syndrome >> 25) & 1) != 0;
+                            let pa = exception.physical_address;
+                            let va = exception.virtual_address;
+                            let is_instr_32_bit = ((syndrome >> 25) & 1) == 1;
                             let access_size = (syndrome >> 22) & 0x3;
-                            let sign_extend = (syndrome >> 21) & 0x1;
-                            let register_transfer = (syndrome >> 16) & 0xf;
-                            let register_is_64_bit = (syndrome >> 15) & 0x1;
+                            let sign_extend = ((syndrome >> 21) & 0x1) == 1;
+                            let register_transfer = (syndrome >> 16) & 0x1f;
+                            let register_is_64_bit = ((syndrome >> 15) & 0x1) == 1;
                             let writing_to_memory = ((syndrome >> 6) & 0x1) == 1;
                             let data_fault_status_code = syndrome & 0x1f;
 
-                            log::info!("is_trapped_instr_32_bit {},access_size 0x{:x},sign_extend 0x{:x},register_transfer 0x{:x},register_is_64_bit 0x{:x},writing_to_memory {},data_fault_status_code 0x{:x}",
-                            is_trapped_instr_32_bit,
-                            access_size,
-                            sign_extend,
-                            register_transfer,
-                            register_is_64_bit,
-                            writing_to_memory,
-                            data_fault_status_code);
-
-                            if is_trapped_instr_32_bit {
-                                /*
-                                    0b00	Byte
-                                    0b01	Halfword
-                                    0b10	Word
-                                    0b11	Doubleword
-                                */
+                            if is_instr_32_bit && !register_is_64_bit {
                                 if !writing_to_memory {
+                                    self.mmio_register_load =
+                                        Some(Self::get_register_by_index(register_transfer));
+                                    match access_size {
+                                        // 8 bit
+                                        0b00 => CpuExitReason::MmIo(MmIoType::ByteIn(pa, unsafe {
+                                            &mut *(&mut self.mmio as *const _ as *mut u8)
+                                        })),
+                                        // 16 bit
+                                        0b01 => CpuExitReason::MmIo(MmIoType::WordIn(pa, unsafe {
+                                            &mut *(&mut self.mmio as *const _ as *mut u16)
+                                        })),
+                                        // 32 bit
+                                        0b10 => CpuExitReason::MmIo(MmIoType::DoubleWordIn(
+                                            pa,
+                                            unsafe {
+                                                &mut *(&mut self.mmio as *const _ as *mut u32)
+                                            },
+                                        )),
+                                        _ => CpuExitReason::NotSupported,
+                                    }
                                 } else {
+                                    let value = if register_transfer != 0x1f {
+                                        self.get_register(Self::get_register_by_index(
+                                            register_transfer,
+                                        ))?
+                                    } else {
+                                        /* The Zero register */
+                                        0
+                                    };
+                                    match access_size {
+                                        // 8 bit
+                                        0b00 => {
+                                            CpuExitReason::MmIo(MmIoType::ByteOut(pa, value as u8))
+                                        }
+                                        // 16 bit
+                                        0b01 => {
+                                            CpuExitReason::MmIo(MmIoType::WordOut(pa, value as u16))
+                                        }
+                                        // 32 bit
+                                        0b10 => CpuExitReason::MmIo(MmIoType::DoubleWordOut(
+                                            pa,
+                                            value as u32,
+                                        )),
+                                        _ => CpuExitReason::NotSupported,
+                                    }
                                 }
+                            } else {
+                                CpuExitReason::NotSupported
                             }
+                        } else {
+                            CpuExitReason::NotSupported
                         }
                     }
-                    _ => {}
+                    _ => CpuExitReason::NotSupported,
                 }
-                let ip = self.vcpu.get_register(Register::PC)?;
-                log::info!(
-                    "Exception syndrome 0x{:x} at 0x{:x}, virt.address 0x{:x}, phys.address 0x{:x}",
-                    ec,
-                    ip,
-                    exception.virtual_address,
-                    exception.physical_address
-                );
-                //self.vcpu.set_register(Register::PC, ip + 4)?;
             }
-            e => panic!("Unsupported Vcpu Exit {:?}", e),
+            _ => CpuExitReason::NotSupported,
+        };
+
+        let ip = self.vcpu.get_register(Register::PC)?;
+        if exit != CpuExitReason::NotSupported {
+            // Advance the instruction pointer
+            self.vcpu.set_register(Register::PC, ip + 4)?;
+        } else {
+            log::error!("Unsupported exit {:#x?} at 0x{:x}", vcpu_exit, ip);
         }
 
-        Ok(CpuExitReason::NotSupported)
+        Ok(exit)
     }
 
     pub fn set_instruction_pointer(&mut self, ip: u64) -> Result<(), HypervisorError> {
@@ -98,5 +149,43 @@ impl Cpu {
     pub fn get_register(&mut self, reg: Register) -> Result<u64, HypervisorError> {
         let value = self.vcpu.get_register(reg)?;
         Ok(value)
+    }
+
+    fn get_register_by_index(index: u64) -> Register {
+        match index {
+            0 => Register::X0,
+            1 => Register::X1,
+            2 => Register::X2,
+            3 => Register::X3,
+            4 => Register::X4,
+            5 => Register::X5,
+            6 => Register::X6,
+            7 => Register::X7,
+            8 => Register::X8,
+            9 => Register::X9,
+            10 => Register::X10,
+            11 => Register::X11,
+            12 => Register::X12,
+            13 => Register::X13,
+            14 => Register::X14,
+            15 => Register::X15,
+            16 => Register::X16,
+            17 => Register::X17,
+            18 => Register::X18,
+            19 => Register::X19,
+            20 => Register::X20,
+            21 => Register::X21,
+            22 => Register::X22,
+            23 => Register::X23,
+            24 => Register::X24,
+            25 => Register::X25,
+            26 => Register::X26,
+            27 => Register::X27,
+            28 => Register::X28,
+            29 => Register::X29, // a.k.a. FP
+            30 => Register::X30, // a.k.a. LR
+            // 31 means the Zero register
+            _ => panic!("Invalid register index {}", index),
+        }
     }
 }
