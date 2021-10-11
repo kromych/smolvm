@@ -236,4 +236,12 @@ impl Cpu {
     pub fn get_instruction_pointer(&mut self) -> Result<u64, std::io::Error> {
         self.get_one_reg(CpuRegister::PC)
     }
+
+    pub fn set_register(&mut self, regsiter: CpuRegister, value: u64) -> Result<(), std::io::Error> {
+        self.set_one_reg(regsiter, value)
+    }
+
+    pub fn get_register(&mut self, regsiter: CpuRegister) -> Result<u64, std::io::Error> {
+        self.get_one_reg(regsiter)
+    }
 }

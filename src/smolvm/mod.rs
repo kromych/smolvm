@@ -11,7 +11,7 @@ use std::{
 };
 
 #[cfg(target_os = "linux")]
-pub use linux::{Cpu, HvError, SmolVm};
+pub use linux::{Cpu, CpuRegister, HvError, SmolVm};
 use object::{
     elf::{FileHeader64, PF_R, PF_W, PF_X},
     read::elf::{FileHeader, ProgramHeader},

@@ -17,7 +17,7 @@ pub use std::io::Error as HvError;
 use nix::{ioctl_read, ioctl_write_int_bad, ioctl_write_ptr, request_code_none};
 
 #[cfg(target_arch = "aarch64")]
-pub use self::aarch64::Cpu;
+pub use self::aarch64::{Cpu, CpuRegister};
 use super::{GpaSpan, MappedGpa, Memory};
 
 pub fn last_os_error() -> std::io::Error {
