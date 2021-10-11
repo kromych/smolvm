@@ -22,47 +22,47 @@ use cpu::*;
 #[allow(dead_code)]
 #[allow(non_camel_case_types)]
 pub enum CpuRegister {
-    X0 = 0,
-    X1 = 1,
-    X2 = 2,
-    X3 = 3,
-    X4 = 4,
-    X5 = 5,
-    X6 = 6,
-    X7 = 7,
-    X8 = 8,
-    X9 = 9,
-    X10 = 10,
-    X11 = 11,
-    X12 = 12,
-    X13 = 13,
-    X14 = 14,
-    X15 = 15,
-    X16 = 16,
-    X17 = 17,
-    X18 = 18,
-    X19 = 19,
-    X20 = 20,
-    X21 = 21,
-    X22 = 22,
-    X23 = 23,
-    X24 = 24,
-    X25 = 25,
-    X26 = 26,
-    X27 = 27,
-    X28 = 28,
-    X29 = 29,
-    X30 = 30,
-    SP = 31,
-    PC = 32,
-    PSTATE = 33,
-    SP_EL1 = 34,
-    ELR_EL1 = 35,
-    SPSR0 = 36,
-    SPSR1 = 37,
-    SPSR2 = 38,
-    SPSR3 = 39,
-    SPSR4 = 40,
+    X0 = 0 * 2 + (REG_ARM64_CORE_BASE | REG_SIZE_U64),
+    X1 = 1 * 2 + (REG_ARM64_CORE_BASE | REG_SIZE_U64),
+    X2 = 2 * 2 + (REG_ARM64_CORE_BASE | REG_SIZE_U64),
+    X3 = 3 * 2 + (REG_ARM64_CORE_BASE | REG_SIZE_U64),
+    X4 = 4 * 2 + (REG_ARM64_CORE_BASE | REG_SIZE_U64),
+    X5 = 5 * 2 + (REG_ARM64_CORE_BASE | REG_SIZE_U64),
+    X6 = 6 * 2 + (REG_ARM64_CORE_BASE | REG_SIZE_U64),
+    X7 = 7 * 2 + (REG_ARM64_CORE_BASE | REG_SIZE_U64),
+    X8 = 8 * 2 + (REG_ARM64_CORE_BASE | REG_SIZE_U64),
+    X9 = 9 * 2 + (REG_ARM64_CORE_BASE | REG_SIZE_U64),
+    X10 = 10 * 2 + (REG_ARM64_CORE_BASE | REG_SIZE_U64),
+    X11 = 11 * 2 + (REG_ARM64_CORE_BASE | REG_SIZE_U64),
+    X12 = 12 * 2 + (REG_ARM64_CORE_BASE | REG_SIZE_U64),
+    X13 = 13 * 2 + (REG_ARM64_CORE_BASE | REG_SIZE_U64),
+    X14 = 14 * 2 + (REG_ARM64_CORE_BASE | REG_SIZE_U64),
+    X15 = 15 * 2 + (REG_ARM64_CORE_BASE | REG_SIZE_U64),
+    X16 = 16 * 2 + (REG_ARM64_CORE_BASE | REG_SIZE_U64),
+    X17 = 17 * 2 + (REG_ARM64_CORE_BASE | REG_SIZE_U64),
+    X18 = 18 * 2 + (REG_ARM64_CORE_BASE | REG_SIZE_U64),
+    X19 = 19 * 2 + (REG_ARM64_CORE_BASE | REG_SIZE_U64),
+    X20 = 20 * 2 + (REG_ARM64_CORE_BASE | REG_SIZE_U64),
+    X21 = 21 * 2 + (REG_ARM64_CORE_BASE | REG_SIZE_U64),
+    X22 = 22 * 2 + (REG_ARM64_CORE_BASE | REG_SIZE_U64),
+    X23 = 23 * 2 + (REG_ARM64_CORE_BASE | REG_SIZE_U64),
+    X24 = 24 * 2 + (REG_ARM64_CORE_BASE | REG_SIZE_U64),
+    X25 = 25 * 2 + (REG_ARM64_CORE_BASE | REG_SIZE_U64),
+    X26 = 26 * 2 + (REG_ARM64_CORE_BASE | REG_SIZE_U64),
+    X27 = 27 * 2 + (REG_ARM64_CORE_BASE | REG_SIZE_U64),
+    X28 = 28 * 2 + (REG_ARM64_CORE_BASE | REG_SIZE_U64),
+    X29 = 29 * 2 + (REG_ARM64_CORE_BASE | REG_SIZE_U64),
+    X30 = 30 * 2 + (REG_ARM64_CORE_BASE | REG_SIZE_U64),
+    SP = 31 * 2 + (REG_ARM64_CORE_BASE | REG_SIZE_U64),
+    PC = 32 * 2 + (REG_ARM64_CORE_BASE | REG_SIZE_U64),
+    MIDR_EL1 = SYS_MIDR_EL1 + (REG_ARM64_SYSREG_BASE | REG_SIZE_U64),
+    MPIDR_EL1 = SYS_MPIDR_EL1 + (REG_ARM64_SYSREG_BASE | REG_SIZE_U64),
+    SCTLR_EL1 = SYS_SCTLR_EL1 + (REG_ARM64_SYSREG_BASE | REG_SIZE_U64),
+    TTBR0_EL1 = SYS_TTBR0_EL1 + (REG_ARM64_SYSREG_BASE | REG_SIZE_U64),
+    TTBR1_EL1 = SYS_TTBR1_EL1 + (REG_ARM64_SYSREG_BASE | REG_SIZE_U64),
+    ESR_EL1 = SYS_ESR_EL1 + (REG_ARM64_SYSREG_BASE | REG_SIZE_U64),
+    SPSR_EL1 = SYS_SPSR_EL1 + (REG_ARM64_SYSREG_BASE | REG_SIZE_U64),
+    MAIR_EL1 = SYS_MAIR_EL1 + (REG_ARM64_SYSREG_BASE | REG_SIZE_U64),
 }
 
 ioctl_write_ptr!(kvm_get_one_reg, KVMIO, 0xab, kvm_one_reg);
@@ -117,10 +117,13 @@ impl Cpu {
 
     pub fn init(&mut self) -> Result<(), std::io::Error> {
         // All interrupts masked
-        self.set_one_reg(
-            CpuRegister::PSTATE,
-            (PSR_D_BIT | PSR_A_BIT | PSR_I_BIT | PSR_F_BIT | PSR_MODE_EL1h) as u64,
-        )?;
+        // self.set_one_reg(CpuRegister::SPSR_EL1, SPSR_INITIAL_VALUE)?;
+        // self.set_one_reg(CpuRegister::SCTLR_EL1, SCTLR_INITIAL_VALUE)?;
+        // self.set_one_reg(CpuRegister::MIDR_EL1, MIDR_EL1_INITIAL_VALUE)?;
+        // self.set_one_reg(CpuRegister::TTBR0_EL1, 0)?;
+        // self.set_one_reg(CpuRegister::TTBR1_EL1, 0)?;
+        // self.set_one_reg(CpuRegister::ESR_EL1, 0)?;
+        // self.set_one_reg(CpuRegister::MAIR_EL1, 0)?;
 
         // Set X0..X3 to zero
         self.set_one_reg(CpuRegister::X0, 0)?;
@@ -196,58 +199,10 @@ impl Cpu {
         Ok(exit_reason)
     }
 
-    fn get_raw_reg_id(reg_id: CpuRegister) -> u64 {
-        match reg_id {
-            CpuRegister::X0
-            | CpuRegister::X1
-            | CpuRegister::X2
-            | CpuRegister::X3
-            | CpuRegister::X4
-            | CpuRegister::X5
-            | CpuRegister::X6
-            | CpuRegister::X7
-            | CpuRegister::X8
-            | CpuRegister::X9
-            | CpuRegister::X10
-            | CpuRegister::X11
-            | CpuRegister::X12
-            | CpuRegister::X13
-            | CpuRegister::X14
-            | CpuRegister::X15
-            | CpuRegister::X16
-            | CpuRegister::X17
-            | CpuRegister::X18
-            | CpuRegister::X19
-            | CpuRegister::X20
-            | CpuRegister::X21
-            | CpuRegister::X22
-            | CpuRegister::X23
-            | CpuRegister::X24
-            | CpuRegister::X25
-            | CpuRegister::X26
-            | CpuRegister::X27
-            | CpuRegister::X28
-            | CpuRegister::X29
-            | CpuRegister::X30
-            | CpuRegister::SP
-            | CpuRegister::PC
-            | CpuRegister::PSTATE => reg_id as u64 * 2 + (REG_ARM64_CORE_BASE | REG_SIZE_U64),
-            CpuRegister::SP_EL1
-            | CpuRegister::ELR_EL1
-            | CpuRegister::SPSR0
-            | CpuRegister::SPSR1
-            | CpuRegister::SPSR2
-            | CpuRegister::SPSR3
-            | CpuRegister::SPSR4 => {
-                todo!()
-            }
-        }
-    }
-
     fn set_one_reg(&mut self, reg_id: CpuRegister, reg_value: u64) -> Result<(), std::io::Error> {
         let mut reg_value = reg_value;
         let mut reg = kvm_one_reg {
-            id: Self::get_raw_reg_id(reg_id),
+            id: reg_id as u64,
             addr: &mut reg_value as *mut u64 as u64,
         };
 
@@ -260,7 +215,7 @@ impl Cpu {
         let mut reg_value: u64 = 0;
 
         let mut reg = kvm_one_reg {
-            id: Self::get_raw_reg_id(reg_id),
+            id: reg_id as u64,
             addr: &mut reg_value as *mut u64 as u64,
         };
 
