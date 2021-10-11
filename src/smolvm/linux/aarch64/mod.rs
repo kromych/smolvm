@@ -12,7 +12,7 @@ use kvm_bindings::{
 use nix::{ioctl_read, ioctl_write_ptr};
 
 use super::Memory;
-use crate::smolvm::CpuExitReason;
+use crate::smolvm::{CpuExitReason, MmIoType};
 
 mod cpu;
 
@@ -142,6 +142,46 @@ impl Cpu {
 
                 CpuExitReason::NotSupported
             }
+            KVM_EXIT_MMIO => unsafe {
+                let mmio = &mut run.__bindgen_anon_1.mmio;
+                let pa = mmio.phys_addr;
+                let len = mmio.len as usize;
+                let data = &mut mmio.data[..len];
+                let writing_to_memory = mmio.is_write != 0;
+
+                if !writing_to_memory {
+                    match len {
+                        1 => CpuExitReason::MmIo(MmIoType::ByteIn(
+                            pa,
+                            &mut *(&mut data[0] as *const _ as *mut u8),
+                        )),
+                        // 16 bit
+                        2 => CpuExitReason::MmIo(MmIoType::WordIn(
+                            pa,
+                            &mut *(&mut data[0] as *const _ as *mut u16),
+                        )),
+                        // 32 bit
+                        4 => CpuExitReason::MmIo(MmIoType::DoubleWordIn(
+                            pa,
+                            &mut *(&mut data[0] as *const _ as *mut u32),
+                        )),
+                        _ => CpuExitReason::NotSupported,
+                    }
+                } else {
+                    match len {
+                        1 => CpuExitReason::MmIo(MmIoType::ByteOut(pa, data[0] as u8)),
+                        2 => CpuExitReason::MmIo(MmIoType::WordOut(
+                            pa,
+                            *(&mut data[0] as *const _ as *mut u16),
+                        )),
+                        4 => CpuExitReason::MmIo(MmIoType::DoubleWordOut(
+                            pa,
+                            *(&mut data[0] as *const _ as *mut u32),
+                        )),
+                        _ => CpuExitReason::NotSupported,
+                    }
+                }
+            },
             _ => {
                 log::error!(
                     "Vcpu Exit {:#x} at {:#x}",
@@ -237,7 +277,11 @@ impl Cpu {
         self.get_one_reg(CpuRegister::PC)
     }
 
-    pub fn set_register(&mut self, regsiter: CpuRegister, value: u64) -> Result<(), std::io::Error> {
+    pub fn set_register(
+        &mut self,
+        regsiter: CpuRegister,
+        value: u64,
+    ) -> Result<(), std::io::Error> {
         self.set_one_reg(regsiter, value)
     }
 
