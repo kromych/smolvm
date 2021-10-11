@@ -35,7 +35,7 @@ pub struct Cpu {
     vcpu: VirtualCpu,
     mmio: u64,
     mmio_register_load: Option<Register>,
-    sctrl_e1: u64,
+    sctlr_e1: u64,
 }
 
 impl Cpu {
@@ -44,7 +44,7 @@ impl Cpu {
             vcpu,
             mmio: 0,
             mmio_register_load: None,
-            sctrl_e1: SCTLR_INITIAL_VALUE,
+            sctlr_e1: SCTLR_INITIAL_VALUE,
         })
     }
 
@@ -55,11 +55,13 @@ impl Cpu {
         self.vcpu
             .set_system_register(SystemRegister::MIDR_EL1, MIDR_EL1_INITIAL_VALUE)?;
 
-        log::info!("Setting SCTLR_EL1 to 0x{:x}", &self.sctrl_e1);
+        log::info!("Setting SCTLR_EL1 to 0x{:x}", &self.sctlr_e1);
         self.vcpu
-            .set_system_register(SystemRegister::SCTLR_EL1, self.sctrl_e1)?;
+            .set_system_register(SystemRegister::SCTLR_EL1, self.sctlr_e1)?;
+        self.vcpu
+            .set_system_register(SystemRegister::MDSCR_EL1, 0)?;
 
-        self.vcpu.set_trap_debug_exceptions(true)?;
+        //self.vcpu.set_trap_debug_exceptions(true)?;
 
         Ok(())
     }
@@ -75,15 +77,56 @@ impl Cpu {
 
         let exit = match vcpu_exit {
             VirtualCpuExitReason::Exception { exception } => {
+                // The ESR-EL2 register describes the exception:
+                // https://developer.arm.com/documentation/ddi0595/2021-09/AArch64-Registers/ESR-EL2--Exception-Syndrome-Register--EL2-?lang=en
                 let syndrome = exception.syndrome;
                 let ec = (syndrome >> 26) & 0x3f;
 
-                // https://developer.arm.com/documentation/ddi0595/2021-09/AArch64-Registers/ESR-EL2--Exception-Syndrome-Register--EL2-?lang=en
                 match ec {
                     0b011000 => {
                         // MSR, MRS, or System instruction
                         // https://developer.arm.com/documentation/ddi0595/2021-09/AArch64-Registers/ESR-EL2--Exception-Syndrome-Register--EL2-?lang=en#fieldset_0-24_0_13
-                        CpuExitReason::NotSupported
+
+                        /*
+                            E.g., for sctlr_el1, there are three options:
+                              *) `mrs Rt,sctlr_el1`:
+                                11010101 || 0011 | 1 | 000 || 0001 | 0000 || 000 | -----
+                                              L   o0   op1    CRn    CRm     op2   Rt
+
+                              *) `msr sctlr_el1,Rt`:
+                                11010101 || 0001 | 1 | 000 || 0001 | 0000 || 000 | -----
+                                              L   o0   op1    CRn    CRm     op2   Rt
+
+                              *) `msr sctlr_el1,imm` is not supported here
+
+                            Below, op0 = o0 + 2
+                        */
+
+                        // Fields from the instruction syndrome for this exception:
+                        let l = syndrome & 0x1;
+                        let rt = (syndrome >> 1) & 0x1f;
+                        // Instead of computing op0, op1, op2, crn, crm, just mask out
+                        // the l and the rt fields
+                        let sys_reg_number = syndrome & 0b1111111111110000011110;
+
+                        // TODO Refactor into more generic code
+                        if sys_reg_number == 0x240004 {
+                            // sctlr_e1
+                            if l == 0 {
+                                // msr sctlr_el1,Rt
+                                let value = self.get_register(Self::get_register_by_index(rt))?;
+                                self.vcpu
+                                    .set_system_register(SystemRegister::SCTLR_EL1, value)?;
+                                self.sctlr_e1 = value;
+                            } else {
+                                // mrs Rt,sctlr_el1
+                                self.set_register(Self::get_register_by_index(rt), self.sctlr_e1)?;
+                            }
+                            CpuExitReason::Continue
+                        } else {
+                            log::error!("Unsupported system register 0x{:x}", sys_reg_number);
+                            CpuExitReason::NotSupported
+                        }
                     }
                     0b100100 => {
                         // Data abort
@@ -223,7 +266,8 @@ impl Cpu {
             28 => Register::X28,
             29 => Register::X29, // a.k.a. FP
             30 => Register::X30, // a.k.a. LR
-            // 31 means the Zero register
+            // 31 means the Zero register or the Stack pointer
+            // depending on the context
             _ => panic!("Invalid register index {}", index),
         }
     }

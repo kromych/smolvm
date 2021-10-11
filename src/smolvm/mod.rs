@@ -218,6 +218,7 @@ pub enum MmIoType<'a> {
 #[derive(PartialEq)]
 pub enum CpuExitReason<'a> {
     NotSupported,
+    Continue,
     Halt,
     Io(IoType<'a>),
     MmIo(MmIoType<'a>),
@@ -465,6 +466,7 @@ pub trait SmolVmT {
 
             match exit_reason {
                 CpuExitReason::NotSupported => panic!("Not supported"),
+                CpuExitReason::Continue => continue,
                 CpuExitReason::Halt => {}
                 CpuExitReason::Io(io_type) => match io_type {
                     IoType::ByteOut(port, byte_out) => {
