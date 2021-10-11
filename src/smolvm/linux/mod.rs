@@ -8,7 +8,7 @@ use kvm_bindings::{kvm_fpu, kvm_guest_debug, kvm_userspace_memory_region};
 #[cfg(target_arch = "x86_64")]
 mod x86_64;
 #[cfg(target_arch = "x86_64")]
-pub use self::x86_64::Cpu;
+pub use self::x86_64::{Cpu, CpuRegister};
 
 #[cfg(target_arch = "aarch64")]
 mod aarch64;
