@@ -7,7 +7,7 @@ git clone https://github.com/crosstool-ng/crosstool-ng.git
 To build `crosstool-ng` on Mac OS X
 
 ```bash
-brew install autoconf bash binutils gawk gmp gnu-sed help2man mpfr openssl pcre readline wget xz
+brew install autoconf automake bash binutils gawk gmp gnu-sed help2man mpfr openssl pcre readline wget xz
 brew install libtool ncurses
 
 export PATH="/opt/homebrew/opt/ncurses/bin:/opt/homebrew/opt/binutils/bin/:/opt/homebrew/bin:$PATH"
