@@ -3,7 +3,7 @@
 Adding `rustc` targets
 
 ```bash
-$ rustup add target aarch64-unknown-linux-musl
+$ rustup target add aarch64-unknown-linux-musl
 $ cargo install cross
 ```
 
