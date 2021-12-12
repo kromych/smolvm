@@ -66,7 +66,7 @@ static uint32_t pl011_read(const struct pl011_t *pl011, uint32_t offset)
     return *((volatile uint32_t*)(pl011->base_addr + offset));
 }
 
-static uint32_t pl011_write(const struct pl011_t *pl011, uint32_t offset, uint32_t value)
+static void pl011_write(const struct pl011_t *pl011, uint32_t offset, uint32_t value)
 {
     *((volatile uint32_t*)(pl011->base_addr + offset)) = value;
 }
