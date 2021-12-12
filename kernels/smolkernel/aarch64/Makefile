@@ -1,14 +1,16 @@
 TARGET=smolkernel
 
-TOOLCHAIN=elf
-CC=aarch64-unknown-$(TOOLCHAIN)-gcc
-LD=aarch64-unknown-$(TOOLCHAIN)-ld
-OBJCOPY=aarch64-unknown-$(TOOLCHAIN)-objcopy
-CFLAGS=-O2 -g -ffreestanding -nostartfiles -static -march=armv8-a -mcmodel=large -mgeneral-regs-only \
+# TOOLCHAIN=elf
+# CC=aarch64-unknown-$(TOOLCHAIN)-gcc
+# LD=aarch64-unknown-$(TOOLCHAIN)-ld
+# OBJCOPY=aarch64-unknown-$(TOOLCHAIN)-objcopy
+CFLAGS=--target=aarch64-unknown-linux-gnu \
+		-O2 -g -ffreestanding  -static -march=armv8-a -mcmodel=large -mgeneral-regs-only \
 		-fno-asynchronous-unwind-tables -fno-unwind-tables \
 		-mbranch-protection=none 
+# -nostartfiles
 # --save-temps
-OBJCOPY_FLAGS :=-O binary -R .note -R .note.gnu.build-id -R .comment -S
+# OBJCOPY_FLAGS :=-O binary -R .note -R .note.gnu.build-id -R .comment -S
 
 .PHONY: all clean
 
