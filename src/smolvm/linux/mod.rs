@@ -86,7 +86,7 @@ impl SmolVm {
 
         let kvm_fd = open_kvm()?;
         let vm_fd = unsafe {
-            kvm_create_vm(kvm_fd, 0 /*vm type */)
+            kvm_create_vm(kvm_fd, 36 /*vm type (PA bits = 32..36) */)
         }?;
 
         let mut spans = Vec::new();
