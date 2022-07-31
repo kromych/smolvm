@@ -156,7 +156,7 @@ impl SmolVm {
             params_slice
         };
 
-        let mut memory = Memory::new(spans);
+        let memory = Memory::new(spans);
 
         #[cfg(target_arch = "x86_64")]
         {

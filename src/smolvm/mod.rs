@@ -1,3 +1,6 @@
+#![allow(dead_code)]
+#![allow(unused_variables)]
+
 #[cfg(target_os = "macos")]
 mod darwin;
 #[cfg(target_os = "macos")]

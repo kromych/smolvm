@@ -1,4 +1,8 @@
 #![cfg(target_arch = "aarch64")]
+#![allow(dead_code)]
+#![allow(non_upper_case_globals)]
+#![allow(non_snake_case)]
+#![allow(unused_imports)]
 
 use std::{
     os::unix::prelude::RawFd,
@@ -185,15 +189,6 @@ impl Cpu {
                     }
                 }
             },
-            _ => {
-                log::error!(
-                    "Vcpu Exit {:#x} at {:#x}",
-                    run.exit_reason,
-                    self.get_instruction_pointer()?
-                );
-
-                CpuExitReason::NotSupported
-            }
         };
 
         Ok(exit_reason)
