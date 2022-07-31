@@ -5,6 +5,7 @@ TARGET=smolkernel
 # LD=aarch64-unknown-$(TOOLCHAIN)-ld
 # OBJCOPY=aarch64-unknown-$(TOOLCHAIN)-objcopy
 CFLAGS=--target=aarch64-unknown-linux-gnu \
+		-fno-stack-protector \
 		-O2 -g -ffreestanding  -static -march=armv8-a -mcmodel=large -mgeneral-regs-only \
 		-fno-asynchronous-unwind-tables -fno-unwind-tables \
 		-mbranch-protection=none 
