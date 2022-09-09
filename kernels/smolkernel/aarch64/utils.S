@@ -36,3 +36,6 @@ arm_reg_\name:
 	declare_reg_get mair_el1
     declare_reg_get cpacr_el1
     declare_reg_get daif
+    declare_reg_get id_aa64mmfr0_el1
+    declare_reg_get id_aa64mmfr1_el1
+    declare_reg_get id_aa64mmfr2_el1

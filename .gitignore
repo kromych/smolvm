@@ -4,3 +4,8 @@ smolkernel.elf
 smolkernel.bin
 /dtb
 *.o
+.DS_Store
+Image
+vmlinu*
+bzImage
+System.map

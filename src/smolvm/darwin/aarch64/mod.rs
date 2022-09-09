@@ -266,8 +266,7 @@ impl Cpu {
             28 => Register::X28,
             29 => Register::X29, // a.k.a. FP
             30 => Register::X30, // a.k.a. LR
-            // 31 means the Zero register or the Stack pointer
-            // depending on the context
+            31 => Register::PC,
             _ => panic!("Invalid register index {}", index),
         }
     }

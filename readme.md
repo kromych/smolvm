@@ -35,7 +35,33 @@ export CC_aarch64_unknown_linux_musl=/opt/gcc-linaro-7.5.0-2019.12-x86_64_aarch6
 
 For a reason unknown to me, cross-compiling on Fedora 34 also required the
 glibc-devel-2.33-20.fc34.i686 (i.e. 32bit x86 glibc library) as the compiler
-needed the `stubs-32.h` hedader (???).
+needed the `stubs-32.h` header (???).
+
+To build the `smolkernel` under MacOS/aarch64, install LLVM
+```
+brew install llvm
+```
+To use LLVM:
+```
+export PATH="/opt/homebrew/opt/llvm/bin:$PATH"
+export LDFLAGS="-L/opt/homebrew/opt/llvm/lib"
+export CPPFLAGS="-I/opt/homebrew/opt/llvm/include"
+export CC=clang
+export CXX=clang++
+export LD=ld.lld
+export AR=llvm-ar
+export RANLIB=llvm-ranlib
+export OBJCOPY=llvm-objcopy
+export NM=llvm-nm
+export TRIPLE=aarch64-unknown-linux-gnu
+alias cc=$CC
+alias c++=$CXX
+alias ld=$LD
+alias ar=$AR
+alias ranlib=$RANLIB
+alias objcopy=$OBJCOPY
+alias nm=$NM
+```
 
 To run the kernels with `qemu`:
 ```bash
@@ -50,25 +76,31 @@ qemu-system-aarch64 -kernel kernels/linux-5.14-stable/aarch64/Image -machine vir
 
 ```
 
-For tracing, add `--trace "*"` options to the command-line
+For tracing, add `--trace "*"` options to the command-line.
 To dump the device tree block, append `,dumpdtb=out-file-name` to the machine model.
 To convert the binary dtb file to a text form: `dtc -I dtb -O dts -o text.dts bin.dtb`
 
-The aarch64 `smolkernel` run under `qemu` reports for select EL1 system registers:
+The aarch64 `smolkernel` run under `qemu` reports some system properties and system registers:
 ```
-PL011 ID 0x111014000df005b10
-VBAR_EL1    0x0000000000000000
-MIDR_EL1    0x00000000410fd034
-MPIDR_EL1   0x0000000080000000
-MDSCR_EL1   0x0000000000000000
-SCTLR_EL1   0x0000000030d50998
-SPSR_EL1    0x0000000000000000
-TCR_EL1     0x0000000000000000
-TTBR0_EL1   0x0000000000000000
-TTBR1_EL1   0x0000000000000000
-ESR_EL1     0x0000000000000000
-ELR_EL1     0x0000000000000000
-MAIR_EL1    0x0000000000000000
-CPACR_EL1   0x0000000000000000
-DAIF        0x00000000000003c0
+Hello, world, from EL 1!
+--------------------------
+VBAR_EL1:		    0x0000000000000000
+MIDR_EL1:		    0x0000000000000000
+MPIDR_EL1:		    0x0000000080000000
+MDSCR_EL1:		    0x0000000000000000
+SCTLR_EL1:		    0x0000000030900180
+SPSR_EL1:		    0x0000000000000000
+TCR_EL1:		    0x0000000000000000
+TTBR0_EL1:		    0x0000000000000000
+TTBR1_EL1:		    0x0000000000000000
+ESR_EL1:		    0x0000000000000000
+ELR_EL1:		    0x0000000000000000
+MAIR_EL1:		    0x0000000000000000
+CPACR_EL1:		    0x0000000000000000
+DAIF:			    0x00000000000003c0
+ID_AA64MMFR0_EL1:	0x000010000f100001
+ID_AA64MMFR1_EL1:	0x0000000011212000
+ID_AA64MMFR2_EL1:	0x1001001100001011
+--------------------------
+PL011 ID: 0x111014000df005b1
 ```

@@ -18,3 +18,6 @@ extern uint64_t arm_reg_elr_el1(void);
 extern uint64_t arm_reg_mair_el1(void);
 extern uint64_t arm_reg_cpacr_el1(void);
 extern uint64_t arm_reg_daif(void);
+extern uint64_t arm_reg_id_aa64mmfr0_el1(void);
+extern uint64_t arm_reg_id_aa64mmfr1_el1(void);
+extern uint64_t arm_reg_id_aa64mmfr2_el1(void);
