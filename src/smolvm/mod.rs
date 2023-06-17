@@ -190,13 +190,9 @@ impl Memory {
     }
 
     pub fn find_span(&self, gpa: u64) -> Option<&MappedGpa> {
-        for span in &self.spans {
-            if span.gpa <= gpa && gpa < span.gpa + span.size as u64 {
-                return Some(span);
-            }
-        }
-
-        None
+        self.spans
+            .iter()
+            .find(|&span| span.gpa <= gpa && gpa < span.gpa + span.size as u64)
     }
 }
 
@@ -246,8 +242,8 @@ pub trait SmolVmT {
     fn load_kernel_elf(
         &mut self,
         elf_data: &[u8],
-        command_line: Option<&str>,
-        dtb_path: Option<&str>,
+        command_line: Option<String>,
+        dtb_path: Option<String>,
     ) {
         #[derive(Default, Clone, Copy)]
         struct SegmentToLoad {
@@ -508,7 +504,7 @@ pub trait SmolVmT {
                     }
                     MmIoType::DoubleWordIn(addr, data) => {
                         if let Some(value) = pl011.read(addr) {
-                            *data = value as u32;
+                            *data = value;
                         }
                     }
                     MmIoType::DoubleWordOut(addr, data) => {

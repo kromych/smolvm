@@ -14,7 +14,7 @@ const SCTLR_EXCEPTION_EXIT_CONTEXT_SYNC: u64 = 1 << 11;
 const SCTLR_STACK_ALIGNMENT_EL0: u64 = 1 << 4;
 const SCTLR_STACK_ALIGNMENT: u64 = 1 << 3;
 const SCTLR_D_CACHE_DISABLED: u64 = 0 << 2;
-const SCTLR_MMU_DISABLED: u64 = 0 << 0;
+const SCTLR_MMU_DISABLED: u64 = 0;
 const SCTLR_MMU_ENABLED: u64 = 1 << 0;
 
 const SCTLR_INITIAL_VALUE: u64 = SCTLR_RESERVED_MUST_BE_1
@@ -150,18 +150,16 @@ impl Cpu {
                                     match access_size {
                                         // 8 bit
                                         0b00 => CpuExitReason::MmIo(MmIoType::ByteIn(pa, unsafe {
-                                            &mut *(&mut self.mmio as *const _ as *mut u8)
+                                            &mut *(&mut self.mmio as *mut _ as *mut u8)
                                         })),
                                         // 16 bit
                                         0b01 => CpuExitReason::MmIo(MmIoType::WordIn(pa, unsafe {
-                                            &mut *(&mut self.mmio as *const _ as *mut u16)
+                                            &mut *(&mut self.mmio as *mut _ as *mut u16)
                                         })),
                                         // 32 bit
                                         0b10 => CpuExitReason::MmIo(MmIoType::DoubleWordIn(
                                             pa,
-                                            unsafe {
-                                                &mut *(&mut self.mmio as *const _ as *mut u32)
-                                            },
+                                            unsafe { &mut *(&mut self.mmio as *mut _ as *mut u32) },
                                         )),
                                         _ => CpuExitReason::NotSupported,
                                     }

@@ -1,41 +1,45 @@
 use std::fs;
 
-use smolvm::{HvError, SmolVmT};
+use smolvm::HvError;
+use smolvm::SmolVmT;
 
 use crate::smolvm::GpaSpan;
-
-#[macro_use]
-extern crate clap;
+use clap::Parser;
 
 #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
 compile_error!("Unsupported target architecture");
 
 mod smolvm;
 
+#[derive(Parser)]
+struct Args {
+    /// Path to the ELF binary (Linux kernel perhaps)
+    kernel_path: Option<String>,
+    /// Kernel command line
+    kernel_cmd_line: Option<String>,
+    /// Path to the Device Tree Blob
+    dtb_path: Option<String>,
+    /// Sets the level of debugging information
+    log_level: Option<String>,
+}
+
 fn main() -> Result<(), HvError> {
-    let matches = clap_app!(smolvm =>
-        (about: "Examples of using virtualization APIs")
-        (@arg KERNEL_PATH: -k --kernel +takes_value "Path to the ELF binary (Linux kernel perhaps)")
-        (@arg KERNEL_CMD_LINE: -c --cmd_line +takes_value "Kernel command line")
-        (@arg DTB_PATH: -d --dtb +takes_value "Path to the Device Tree Blob")
-        (@arg LOG_LEVEL: -l --log_level +takes_value ... "Sets the level of debugging information")
-    )
-    .get_matches();
+    let args = Args::parse();
 
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or(
-        if let Some(level) = matches.value_of("LOG_LEVEL") {
+        if let Some(level) = args.log_level {
             level
         } else {
-            "info"
+            "info".to_string()
         },
     ))
     .init();
 
-    if let Some(kernel_path) = matches.value_of("KERNEL_PATH") {
+    if let Some(kernel_path) = args.kernel_path {
         log::info!("Kernel path {}", kernel_path);
 
-        let command_line = matches.value_of("KERNEL_CMD_LINE");
-        let dtb_path = matches.value_of("DTB_PATH");
+        let command_line = args.kernel_cmd_line;
+        let dtb_path = args.dtb_path;
 
         run_kernel(kernel_path, command_line, dtb_path)?;
     } else {
@@ -47,9 +51,9 @@ fn main() -> Result<(), HvError> {
 }
 
 fn run_kernel(
-    kernel_path: &str,
-    command_line: Option<&str>,
-    dtb_path: Option<&str>,
+    kernel_path: String,
+    command_line: Option<String>,
+    dtb_path: Option<String>,
 ) -> Result<(), HvError> {
     log::info!("Opening {}", kernel_path);
 
@@ -65,7 +69,7 @@ fn run_kernel(
         start: gpa_start,
         size: 512 * 1024 * 1024,
     }])?;
-    vm.load_kernel_elf(&*file, command_line, dtb_path);
+    vm.load_kernel_elf(&file, command_line, dtb_path);
     vm.run()?;
 
     Ok(())
